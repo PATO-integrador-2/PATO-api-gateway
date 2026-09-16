@@ -92,3 +92,38 @@ func (ai *AIService) Predict(predictionType string, payload map[string]interface
 
 	return result, nil
 }
+
+// ExportPDF reenvía un conjunto de datos (título + registros) al servicio de IA
+// para que genere el reporte y devuelve el PDF crudo tal cual, sin intentar
+// decodificarlo como JSON.
+func (ai *AIService) ExportPDF(payload map[string]interface{}) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("payload inválido: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/export/pdf", ai.baseURL)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo construir la petición al servicio de IA: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ai.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo contactar al servicio de IA: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer la respuesta del servicio de IA: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, &PredictionUpstreamError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+
+	return respBody, nil
+}

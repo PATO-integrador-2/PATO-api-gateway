@@ -61,3 +61,41 @@ func (h *AIHandler) Predict(c *gin.Context) {
 
 	c.JSON(http.StatusOK, data)
 }
+
+// ExportPDF reenvía a la API de IA un conjunto de datos (título + registros,
+// normalmente el `data` obtenido de /predictions/:type) y devuelve el PDF
+// generado como archivo descargable (POST /export/pdf).
+func (h *AIHandler) ExportPDF(c *gin.Context) {
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Datos inválidos",
+		})
+		return
+	}
+
+	pdfBytes, err := h.aiService.ExportPDF(payload)
+	if err != nil {
+		var upstreamErr *services.PredictionUpstreamError
+
+		switch {
+		case errors.As(err, &upstreamErr):
+			status := upstreamErr.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			c.JSON(status, gin.H{
+				"error": "El servicio de predicción no pudo generar el PDF",
+			})
+
+		default:
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "No se pudo contactar al servicio de predicción",
+			})
+		}
+		return
+	}
+
+	c.Header("Content-Disposition", `attachment; filename="reporte.pdf"`)
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
