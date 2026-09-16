@@ -93,16 +93,13 @@ func (ai *AIService) Predict(predictionType string, payload map[string]interface
 	return result, nil
 }
 
-// ExportPDF reenvía un conjunto de datos (título + registros) al servicio de IA
-// para que genere el reporte y devuelve el PDF crudo tal cual, sin intentar
-// decodificarlo como JSON.
-func (ai *AIService) ExportPDF(payload map[string]interface{}) ([]byte, error) {
+// postForBytes envía `payload` como JSON a `url` y devuelve el cuerpo de la
+// respuesta tal cual (sin decodificarlo), útil para respuestas binarias (PDF).
+func (ai *AIService) postForBytes(url string, payload map[string]interface{}) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("payload inválido: %w", err)
 	}
-
-	url := fmt.Sprintf("%s/export/pdf", ai.baseURL)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -126,4 +123,25 @@ func (ai *AIService) ExportPDF(payload map[string]interface{}) ([]byte, error) {
 	}
 
 	return respBody, nil
+}
+
+// ExportPDF reenvía un conjunto de datos ya calculados (título + registros)
+// al servicio de IA para que genere el reporte, y devuelve el PDF crudo.
+// Útil cuando el cliente ya llamó antes a /predictions/:type y solo quiere
+// convertir ese `data` a PDF.
+func (ai *AIService) ExportPDF(payload map[string]interface{}) ([]byte, error) {
+	url := fmt.Sprintf("%s/export/pdf", ai.baseURL)
+	return ai.postForBytes(url, payload)
+}
+
+// ExportPredictionPDF pide al servicio de IA que calcule la predicción del
+// tipo indicado (mismos parámetros que Predict) y devuelva directamente el
+// PDF, sin que el cliente tenga que hacer dos llamadas.
+func (ai *AIService) ExportPredictionPDF(predictionType string, payload map[string]interface{}) ([]byte, error) {
+	if !allowedPredictionTypes[predictionType] {
+		return nil, ErrPredictionTypeNotAllowed
+	}
+
+	url := fmt.Sprintf("%s/export/pdf/%s", ai.baseURL, predictionType)
+	return ai.postForBytes(url, payload)
 }

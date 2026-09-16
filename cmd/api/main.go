@@ -247,6 +247,12 @@ func main() {
 			"/exports/pdf",
 			aiHandler.ExportPDF,
 		)
+
+		// Historia: Predecir y exportar a PDF en un solo paso (consume la API de IA)
+		protectedUsers.POST(
+			"/exports/pdf/:type",
+			aiHandler.ExportPredictionPDF,
+		)
 	}
 
 	addr := fmt.Sprintf(
