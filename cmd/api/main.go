@@ -113,6 +113,11 @@ func main() {
 		)
 
 		publicUsers.POST(
+			"/resend-verification",
+			handlers.ProxyHandler(userProxy),
+		)
+
+		publicUsers.POST(
 			"/forgot-password",
 			handlers.ProxyHandler(userProxy),
 		)
