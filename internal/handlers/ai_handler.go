@@ -48,7 +48,8 @@ func (h *AIHandler) Predict(c *gin.Context) {
 				status = http.StatusBadGateway
 			}
 			c.JSON(status, gin.H{
-				"error": "El servicio de predicción no pudo generar el resultado",
+				"error":  "El servicio de predicción no pudo generar el resultado",
+				"detail": upstreamErr.Body,
 			})
 
 		default:
@@ -85,7 +86,8 @@ func (h *AIHandler) ExportPDF(c *gin.Context) {
 				status = http.StatusBadGateway
 			}
 			c.JSON(status, gin.H{
-				"error": "El servicio de predicción no pudo generar el PDF",
+				"error":  "El servicio de predicción no pudo generar el PDF",
+				"detail": upstreamErr.Body,
 			})
 
 		default:
@@ -130,7 +132,8 @@ func (h *AIHandler) ExportPredictionPDF(c *gin.Context) {
 				status = http.StatusBadGateway
 			}
 			c.JSON(status, gin.H{
-				"error": "El servicio de predicción no pudo generar el PDF",
+				"error":  "El servicio de predicción no pudo generar el PDF",
+				"detail": upstreamErr.Body,
 			})
 
 		default:
