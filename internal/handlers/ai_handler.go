@@ -48,7 +48,8 @@ func (h *AIHandler) Predict(c *gin.Context) {
 				status = http.StatusBadGateway
 			}
 			c.JSON(status, gin.H{
-				"error": "El servicio de predicción no pudo generar el resultado",
+				"error":  "El servicio de predicción no pudo generar el resultado",
+				"detail": upstreamErr.Body,
 			})
 
 		default:
@@ -85,7 +86,54 @@ func (h *AIHandler) ExportPDF(c *gin.Context) {
 				status = http.StatusBadGateway
 			}
 			c.JSON(status, gin.H{
-				"error": "El servicio de predicción no pudo generar el PDF",
+				"error":  "El servicio de predicción no pudo generar el PDF",
+				"detail": upstreamErr.Body,
+			})
+
+		default:
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "No se pudo contactar al servicio de predicción",
+			})
+		}
+		return
+	}
+
+	c.Header("Content-Disposition", `attachment; filename="reporte.pdf"`)
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
+
+// ExportPredictionPDF calcula la predicción del tipo indicado y devuelve
+// directamente el PDF, en una sola llamada (POST /exports/pdf/:type).
+// El body es el mismo que se usaría en /predictions/:type.
+func (h *AIHandler) ExportPredictionPDF(c *gin.Context) {
+	predictionType := c.Param("type")
+
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Datos inválidos",
+		})
+		return
+	}
+
+	pdfBytes, err := h.aiService.ExportPredictionPDF(predictionType, payload)
+	if err != nil {
+		var upstreamErr *services.PredictionUpstreamError
+
+		switch {
+		case errors.Is(err, services.ErrPredictionTypeNotAllowed):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.As(err, &upstreamErr):
+			status := upstreamErr.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			c.JSON(status, gin.H{
+				"error":  "El servicio de predicción no pudo generar el PDF",
+				"detail": upstreamErr.Body,
 			})
 
 		default:
