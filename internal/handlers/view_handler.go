@@ -33,7 +33,7 @@ type MultiFilterRequest struct {
 }
 
 // formatColumnValue convierte el valor recibido en JSON (string o número,
-// ej. "anio": 2018) al string que espera el filtro de la vista.
+// ej. "year": 2018) al string que espera el filtro de la vista.
 func formatColumnValue(value interface{}) string {
 	if f, ok := value.(float64); ok {
 		return strconv.FormatFloat(f, 'f', -1, 64)
@@ -85,7 +85,7 @@ func (h *ViewHandler) GetViewFilteredData(c *gin.Context) {
 }
 
 // GetViewFilteredDataMulti filtra una vista por dos o más categorías a la vez
-// (ej. dominio + pais), combinando las condiciones con AND.
+// (ej. domain + country), combinando las condiciones con AND.
 func (h *ViewHandler) GetViewFilteredDataMulti(c *gin.Context) {
 	var request MultiFilterRequest
 
@@ -116,8 +116,8 @@ func (h *ViewHandler) GetViewFilteredDataMulti(c *gin.Context) {
 }
 
 // GetCategories devuelve los valores distintos de una columna dentro de una vista,
-// usado tanto para categorías IPM (dominio, dimension, variable, privacion) como
-// para ubicaciones geográficas (pais, region, departamento, area_geografica).
+// usado tanto para categorías IPM (domain, dimension, variable, deprivation) como
+// para ubicaciones geográficas (country, region, department_name, geographic_area).
 func (h *ViewHandler) GetCategories(c *gin.Context) {
 	var query CategoryQuery
 

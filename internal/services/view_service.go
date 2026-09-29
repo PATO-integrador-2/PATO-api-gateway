@@ -16,51 +16,52 @@ func NewViewService(db *sql.DB) *ViewService {
 }
 
 var allowedViews = map[string]bool{
-	"vw_ipm_by_domain":                        true,
-	"vw_average_deprivations":                 true,
-	"vw_deprivations_by_variable":             true,
-	"vw_dashboard03_national_poverty":         true,
-	"vw_dashboard03_poverty_by_age":           true,
-	"vw_dashboard03_deprivation_contribution": true,
-	"vw_dimension_contribution":               true,
-	"vw_incidence_by_household_head_sex":      true,
-	"vw_incidence_by_person_sex":              true,
-	"vw_household_poverty_by_department":      true,
+	"vw_ipm_incidence":                      true,
+	"vw_ipm_deprivations_variable":          true,
+	"vw_ipm_deprivation_proportion":         true,
+	"vw_ipm_contribution_dimension":         true,
+	"vw_ipm_incidence_person_sex":           true,
+	"vw_ipm_incidence_household_head_sex":   true,
+	"vw_ipm_household_departmental":         true,
+	"vw_latam_ipm_deprivation_contribution": true,
+	"vw_latam_ipm_national_population":      true,
+	"vw_latam_ipm_age_group":                true,
 }
 
 var allowedColumns = map[string]bool{
-	"anio":                           true,
-	"dominio":                        true,
-	"variable":                       true,
-	"area_geografica":                true,
-	"pais":                           true,
-	"grupo_erario":                   true,
-	"valor_porcentaje":               true,
-	"privacion":                      true,
-	"tipo_medida_pm":                 true,
-	"dimension":                      true,
-	"porcentaje":                     true,
-	"region":                         true,
-	"departamento":                   true,
-	"sexo":                           true,
-	"personas_que_habitan_ese_hogar": true,
-	"privacion_bajo_logro_educativo": true,
-	"privacion_analfabetismo":        true,
-	"privacion_inasistencia_escolar": true,
-	"privacion_rezago_escolar":       true,
-	"privacion_atencion_integral_primera_infancia": true,
-	"privacion_trabajo_infantil":                   true,
-	"privacion_no_aseguramiento_salud":             true,
-	"privacion_barreras_acceso_salud":              true,
-	"privacion_desempleo_larga_duracion":           true,
-	"privacion_tasa_empleo_formal":                 true,
-	"privacion_no_acceso_agua_mejorada":            true,
-	"privacion_inadecuada_eliminacion_excretas":    true,
-	"privacion_inadecuado_material_pisos":          true,
-	"privacion_inadecuado_material_paredes":        true,
-	"privacion_hacinamiento_critico":               true,
-	"ipm":                                          true,
-	"pobre":                                        true,
+	"year":                              true,
+	"domain":                            true,
+	"variable":                          true,
+	"dimension":                         true,
+	"sex":                               true,
+	"deprivation":                       true,
+	"country":                           true,
+	"geographic_area":                   true,
+	"measurement_type":                  true,
+	"age_group":                         true,
+	"ipm":                               true,
+	"percentage":                        true,
+	"value_percentage":                  true,
+	"region":                            true,
+	"department_name":                   true,
+	"household_members":                 true,
+	"dep_low_educational_achievement":   true,
+	"dep_illiteracy":                    true,
+	"dep_school_nonattendance":          true,
+	"dep_school_lag":                    true,
+	"dep_early_childhood_care_barriers": true,
+	"dep_child_labor":                   true,
+	"dep_no_health_insurance":           true,
+	"dep_health_access_barriers":        true,
+	"dep_long_term_unemployment":        true,
+	"dep_informal_employment":           true,
+	"dep_no_improved_water_source":      true,
+	"dep_inadequate_excreta_disposal":   true,
+	"dep_inadequate_floor_material":     true,
+	"dep_inadequate_wall_material":      true,
+	"dep_critical_overcrowding":         true,
+	"ipm_score":                         true,
+	"is_poor":                           true,
 }
 
 func (vs *ViewService) GetViewTotalData(viewName string) ([]map[string]interface{}, error) {
@@ -68,7 +69,7 @@ func (vs *ViewService) GetViewTotalData(viewName string) ([]map[string]interface
 		return nil, fmt.Errorf("vista no permitida: %s", viewName)
 	}
 	query := fmt.Sprintf(
-		`SELECT * FROM "%s" ORDER BY "anio" ASC`,
+		`SELECT * FROM "%s" ORDER BY "year" ASC`,
 		viewName,
 	)
 
@@ -179,7 +180,7 @@ func (vs *ViewService) GetViewFilteredData(
 	}
 
 	query := fmt.Sprintf(
-		`SELECT * FROM "%s" WHERE "%s" = $1 ORDER BY "anio" ASC`,
+		`SELECT * FROM "%s" WHERE "%s" = $1 ORDER BY "year" ASC`,
 		viewName,
 		columnName,
 	)
@@ -201,7 +202,7 @@ type ColumnFilter struct {
 }
 
 // GetViewFilteredDataMulti filtra una vista por dos o más columnas a la vez
-// (ej. dominio + pais + anio), combinando las condiciones con AND.
+// (ej. domain + country + year), combinando las condiciones con AND.
 func (vs *ViewService) GetViewFilteredDataMulti(
 	viewName string,
 	filters []ColumnFilter,
@@ -227,7 +228,7 @@ func (vs *ViewService) GetViewFilteredDataMulti(
 	}
 
 	query := fmt.Sprintf(
-		`SELECT * FROM "%s" WHERE %s ORDER BY "anio" ASC`,
+		`SELECT * FROM "%s" WHERE %s ORDER BY "year" ASC`,
 		viewName,
 		strings.Join(conditions, " AND "),
 	)

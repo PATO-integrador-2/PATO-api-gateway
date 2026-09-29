@@ -172,50 +172,50 @@ func main() {
 
 		protectedUsers.GET(
 			"/ipm-by-domain",
-			handlers.ViewTotalHandler(viewService, "vw_ipm_by_domain"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_incidence"),
 		)
 		protectedUsers.GET(
 			"/average-deprivations",
-			handlers.ViewTotalHandler(viewService, "vw_average_deprivations"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_deprivation_proportion"),
 		)
 		protectedUsers.GET(
 			"/deprivations-by-variable",
-			handlers.ViewTotalHandler(viewService, "vw_deprivations_by_variable"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_deprivations_variable"),
 		)
 
 		protectedUsers.GET(
 			"/national-poverty",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"),
+			handlers.ViewTotalHandler(viewService, "vw_latam_ipm_national_population"),
 		)
 
 		protectedUsers.GET(
 			"/poverty-by-age",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"),
+			handlers.ViewTotalHandler(viewService, "vw_latam_ipm_age_group"),
 		)
 
 		protectedUsers.GET(
 			"/deprivations-contribution",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_deprivation_contribution"),
+			handlers.ViewTotalHandler(viewService, "vw_latam_ipm_deprivation_contribution"),
 		)
 
 		protectedUsers.GET(
 			"/dimension-contribution",
-			handlers.ViewTotalHandler(viewService, "vw_dimension_contribution"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_contribution_dimension"),
 		)
 
 		protectedUsers.GET(
 			"/incidence-by-household-head-sex",
-			handlers.ViewTotalHandler(viewService, "vw_incidence_by_household_head_sex"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_incidence_household_head_sex"),
 		)
 
 		protectedUsers.GET(
 			"/incidence-by-person-sex",
-			handlers.ViewTotalHandler(viewService, "vw_incidence_by_person_sex"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_incidence_person_sex"),
 		)
 
 		protectedUsers.GET(
 			"/household-poverty-by-department",
-			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
+			handlers.ViewTotalHandler(viewService, "vw_ipm_household_departmental"),
 		)
 
 		protectedUsers.POST(
@@ -223,7 +223,7 @@ func main() {
 			viewHandler.GetViewFilteredData,
 		)
 
-		// Historia: Filtrar por 2 o más categorías a la vez (ej. dominio + pais)
+		// Historia: Filtrar por 2 o más categorías a la vez (ej. domain + country)
 		protectedUsers.POST(
 			"/filtered/multi",
 			viewHandler.GetViewFilteredDataMulti,

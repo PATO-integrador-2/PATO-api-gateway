@@ -687,19 +687,20 @@ Estos endpoints permiten consultar las vistas de PostgreSQL que alimentan los da
 
 **Vistas permitidas (`viewName`):**
 
-* `vw_ipm_by_domain`
-* `vw_average_deprivations`
-* `vw_deprivations_by_variable`
-* `vw_dashboard03_national_poverty`
-* `vw_dashboard03_poverty_by_age`
-* `vw_dashboard03_deprivation_contribution`
-* `vw_dimension_contribution`
-* `vw_incidence_by_household_head_sex`
-* `vw_incidence_by_person_sex`
+* `vw_ipm_incidence`
+* `vw_ipm_deprivations_variable`
+* `vw_ipm_deprivation_proportion`
+* `vw_ipm_contribution_dimension`
+* `vw_ipm_incidence_person_sex`
+* `vw_ipm_incidence_household_head_sex`
+* `vw_ipm_household_departmental`
+* `vw_latam_ipm_deprivation_contribution`
+* `vw_latam_ipm_national_population`
+* `vw_latam_ipm_age_group`
 
 **Columnas permitidas (`columnName`):**
 
-`anio`, `dominio`, `variable`, `area_geografica`, `pais`, `grupo_erario`, `valor_porcentaje`, `privacion`, `tipo_medida_pm`, `dimension`, `porcentaje`, `region`, `departamento`, `sexo`
+`year`, `domain`, `variable`, `dimension`, `sex`, `deprivation`, `country`, `geographic_area`, `measurement_type`, `age_group`, `ipm`, `percentage`, `value_percentage`, `region`, `department_name`, `household_members`, `ipm_score`, `is_poor` y las 15 columnas booleanas `dep_*` de `vw_ipm_household_departmental` (`dep_low_educational_achievement`, `dep_illiteracy`, `dep_school_nonattendance`, `dep_school_lag`, `dep_early_childhood_care_barriers`, `dep_child_labor`, `dep_no_health_insurance`, `dep_health_access_barriers`, `dep_long_term_unemployment`, `dep_informal_employment`, `dep_no_improved_water_source`, `dep_inadequate_excreta_disposal`, `dep_inadequate_floor_material`, `dep_inadequate_wall_material`, `dep_critical_overcrowding`)
 
 > Todos los valores de filtro (`columnValue`) se envían como **string**, incluso los años (`"2010"`, no `2010`) — el binding del gateway rechaza tipos numéricos con `400 Bad Request`.
 
@@ -718,8 +719,8 @@ Authorization: Bearer <token>
 
 ```json
 {
-    "viewName": "vw_dashboard03_national_poverty",
-    "columnName": "pais",
+    "viewName": "vw_latam_ipm_national_population",
+    "columnName": "country",
     "columnValue": "Chile"
 }
 ```
@@ -729,11 +730,11 @@ Authorization: Bearer <token>
 ```json
 [
     {
-        "anio": 2009,
-        "area_geografica": "National",
-        "pais": "Chile",
-        "tipo_medida_pm": "Incidencia (H)",
-        "valor_porcentaje": "27.000000"
+        "year": 2009,
+        "geographic_area": "National",
+        "country": "Chile",
+        "measurement_type": "Incidencia (H)",
+        "value_percentage": "27.000000"
     }
 ]
 ```
@@ -761,10 +762,10 @@ Authorization: Bearer <token>
 
 ```json
 {
-    "viewName": "vw_dashboard03_national_poverty",
+    "viewName": "vw_latam_ipm_national_population",
     "filters": [
-        { "columnName": "anio", "columnValue": "2009" },
-        { "columnName": "pais", "columnValue": "Chile" }
+        { "columnName": "year", "columnValue": "2009" },
+        { "columnName": "country", "columnValue": "Chile" }
     ]
 }
 ```
@@ -797,25 +798,25 @@ POST /api/users/filtered/multi
 ```json
 [
     {
-        "anio": 2009,
-        "area_geografica": "National",
-        "pais": "Chile",
-        "tipo_medida_pm": "Incidencia (H)",
-        "valor_porcentaje": "27.000000"
+        "year": 2009,
+        "geographic_area": "National",
+        "country": "Chile",
+        "measurement_type": "Incidencia (H)",
+        "value_percentage": "27.000000"
     },
     {
-        "anio": 2009,
-        "area_geografica": "Urban",
-        "pais": "Chile",
-        "tipo_medida_pm": "Incidencia (H)",
-        "valor_porcentaje": "25.000000"
+        "year": 2009,
+        "geographic_area": "Urban",
+        "country": "Chile",
+        "measurement_type": "Incidencia (H)",
+        "value_percentage": "25.000000"
     },
     {
-        "anio": 2009,
-        "area_geografica": "Rural",
-        "pais": "Chile",
-        "tipo_medida_pm": "Incidencia (H)",
-        "valor_porcentaje": "44.000000"
+        "year": 2009,
+        "geographic_area": "Rural",
+        "country": "Chile",
+        "measurement_type": "Incidencia (H)",
+        "value_percentage": "44.000000"
     }
 ]
 ```
@@ -840,7 +841,7 @@ Devuelve los valores distintos de una columna dentro de una vista — usado para
 ### Request
 
 ```http
-GET http://localhost:8080/api/users/categories?view=vw_dashboard03_national_poverty&column=pais
+GET http://localhost:8080/api/users/categories?view=vw_latam_ipm_national_population&column=country
 Authorization: Bearer <token>
 ```
 
