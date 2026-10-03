@@ -65,15 +65,23 @@ APP_PORT=8080
 APP_ENV=development
 APP_NAME=PATO API Gateway
 
-USER_SERVICE_URL=http://tu_url:8081
-AI_SERVICE_URL=http://tu_url:8000
+USER_SERVICE_URL=http://tu_url:Puerto
+AI_SERVICE_URL=http://tu_url:Puerto
 
-APP_VALKEY_ADDR=tu_ip:6379
+# IA generativa (RAG con Qwen) y cuota diaria de tokens
+RAG_SERVICE_URL=http://tu_url:Puerto
+RAG_API_KEY=api_key_del_rag
+RAG_TIMEOUT_SECONDS=120
+
+# BD con app_user, user_role y role (user_management_db), distinta a DATABASE_URL
+USERS_DATABASE_URL=postgres://usuario:clave@host:5432/user_management_db
+
+APP_VALKEY_ADDR=tu_ip:Puerto
 APP_VALKEY_USER=tu_usuario_valkey
 APP_VALKEY_PASSWORD=tu_contraseña_muy_segura
 APP_VALKEY_DB=0
 
-APP_CORS_ORIGIN=http://tu_url:3000
+APP_CORS_ORIGIN=http://tu_url:Puerto
 ```
 
 El archivo `.env` **no debe subirse al repositorio**, por lo que debe estar incluido en `.gitignore`:
@@ -860,6 +868,87 @@ Authorization: Bearer <token>
 | 401         | Falta el token, formato inválido, o no existe en Valkey            |
 | 400         | Faltan los parámetros `view` o `column`                             |
 | 400         | `view` o `column` no están en la lista blanca                       |
+
+---
+
+# 19.2 IA generativa con cuota diaria de tokens
+
+`POST /api/users/chat/ask` reenvía la pregunta al RAG (Qwen vía Ollama) y descuenta tokens de la cuota diaria del usuario. La ruta solo se registra si `USERS_DATABASE_URL` está definida.
+
+* **Límite:** `role.max_tokens`. Si el usuario tiene varios roles se toma el mayor; si algún rol tiene `NULL`, o no tiene roles, no tiene límite.
+* **Consumo:** `app_user.used_tokens`, que se reinicia a 0 cada día a medianoche (hora del servidor). El reinicio lo hace el gateway y queda marcado en Valkey (`quota:last_reset`), por lo que se recupera si el gateway estuvo caído a medianoche.
+* **Bloqueo:** `QuotaMiddleware` consulta la cuota antes de reenviar. Si `used_tokens >= max_tokens`, responde `429` y **no llama al RAG**.
+* **user_id:** siempre se toma del token de sesión; el `user_id` que envíe el cliente se ignora.
+
+### Request
+
+```http
+POST http://localhost:8080/api/users/chat/ask
+Authorization: Bearer <token>
+```
+
+```json
+{
+    "question": "¿Qué es el IPM?",
+    "conversation_id": null
+}
+```
+
+El resto de campos (`filters`, `context`, `session_id`) se reenvían tal cual al RAG.
+
+### Respuesta exitosa
+
+La respuesta del RAG más un bloque `usage`:
+
+```json
+{
+    "answer": "...",
+    "conversation_id": "...",
+    "usage": {
+        "tokens_estimated": 2255,
+        "used_tokens": 2255,
+        "max_tokens": 50000,
+        "remaining_tokens": 47745
+    }
+}
+```
+
+### Cuota agotada
+
+HTTP `429 Too Many Requests`, con el header `Retry-After` (segundos hasta medianoche):
+
+```json
+{
+    "error": "Se te acabaron los tokens de hoy. Tu cuota se reinicia a medianoche.",
+    "code": "TOKENS_EXHAUSTED",
+    "used_tokens": 50000,
+    "max_tokens": 50000
+}
+```
+
+### Posibles errores
+
+| Código HTTP | Code                  | Causa                                                          |
+| ----------- | ---------------------- | ----------------------------------------------------------------- |
+| 401         | `UNAUTHORIZED`          | Token inválido o usuario inexistente                              |
+| 429         | `TOKENS_EXHAUSTED`      | Se agotó la cuota diaria                                          |
+| 503         | `QUOTA_CHECK_FAILED`    | No se pudo leer la cuota; se bloquea la petición por seguridad    |
+| 502         | —                       | No se pudo contactar al RAG                                       |
+
+Los errores del RAG se devuelven con su mismo código y **no consumen tokens**.
+
+### Los tokens son una estimación
+
+El RAG no reporta tokens, así que el gateway los estima con lo que ve:
+
+```text
+entrada = tokens(pregunta) + QUOTA_PROMPT_OVERHEAD_TOKENS
+          + chunks_used × QUOTA_TOKENS_PER_CHUNK
+          + QUOTA_HISTORY_TOKENS   (solo si la petición trae conversation_id)
+salida  = tokens(respuesta)
+```
+
+`tokens(texto) = ceil(caracteres / QUOTA_CHARS_PER_TOKEN)`. Para calibrar las constantes, mide `prompt_eval_count` y `eval_count` de Ollama con preguntas reales y ajusta las variables `QUOTA_*`.
 
 ---
 

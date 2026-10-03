@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"backend/internal/config"
 	"backend/internal/database"
@@ -68,6 +70,45 @@ func main() {
 
 	// Servicio para consumir la API de IA (predicciones)
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
+
+	// Cuota diaria de tokens de la IA generativa (RAG con Qwen).
+	// Lee max_tokens (role) y used_tokens (app_user) de la BD de usuarios.
+	var (
+		quotaService *services.QuotaService
+		ragHandler   *handlers.RAGHandler
+	)
+	if cfg.Quota.UsersDatabaseURL != "" {
+		usersDB, err := sql.Open("pgx", cfg.Quota.UsersDatabaseURL)
+		if err != nil {
+			log.Fatalf("Failed to open users database: %v", err)
+		}
+		defer usersDB.Close()
+
+		if err := usersDB.Ping(); err != nil {
+			log.Fatalf("Failed to connect to users database: %v", err)
+		}
+
+		quotaService = services.NewQuotaService(usersDB, valkeyClient)
+
+		resetCtx, stopReset := context.WithCancel(context.Background())
+		defer stopReset()
+		quotaService.StartDailyReset(resetCtx)
+
+		ragHandler = handlers.NewRAGHandler(
+			cfg.RAGService.BaseURL,
+			cfg.RAGService.APIKey,
+			time.Duration(cfg.RAGService.TimeoutSeconds)*time.Second,
+			quotaService,
+			services.TokenEstimator{
+				CharsPerToken:        cfg.Quota.CharsPerToken,
+				PromptOverheadTokens: cfg.Quota.PromptOverheadTokens,
+				TokensPerChunk:       cfg.Quota.TokensPerChunk,
+				HistoryTokens:        cfg.Quota.HistoryTokens,
+			},
+		)
+	} else {
+		log.Println("USERS_DATABASE_URL no definida: la ruta /api/users/chat/ask queda deshabilitada")
+	}
 
 	router := gin.Default()
 
@@ -253,6 +294,16 @@ func main() {
 			"/exports/pdf/:type",
 			aiHandler.ExportPredictionPDF,
 		)
+
+		// IA generativa (RAG con Qwen), con cuota diaria de tokens:
+		// QuotaMiddleware responde 429 y no reenvía al RAG si ya se agotó.
+		if ragHandler != nil {
+			protectedUsers.POST(
+				"/chat/ask",
+				middleware.QuotaMiddleware(quotaService),
+				ragHandler.Ask,
+			)
+		}
 	}
 
 	addr := fmt.Sprintf(
