@@ -152,6 +152,7 @@ AuthMiddleware
 | `POST`  | `/api/users/register`           | Registrar usuario (proxy)               | No             |
 | `POST`  | `/api/users/login`              | Iniciar sesión y obtener token (proxy)  | No             |
 | `POST`  | `/api/users/verify-email`       | Verificar correo (proxy)                | No             |
+| `POST`  | `/api/users/resend-verification` | Reenviar código de verificación de correo (proxy) | No     |
 | `POST`  | `/api/users/forgot-password`    | Solicitar recuperación de contraseña (proxy) | No        |
 | `POST`  | `/api/users/verify-reset-token` | Verificar que el token de recuperación sea válido (proxy) | No |
 | `POST`  | `/api/users/reset-password`     | Restablecer contraseña (proxy)          | No             |
@@ -235,6 +236,34 @@ POST http://localhost:8080/api/users/verify-email
 ```json
 {
     "message": "Email verified successfully"
+}
+```
+
+---
+
+# 9.1. Reenvío del correo de verificación
+
+Si el usuario no recibió el correo o el código expiró (TTL de 15 minutos), puede solicitar que se le envíe uno nuevo. Por seguridad, la respuesta es siempre la misma exista o no el correo, y esté o no ya verificado — así no se revela esa información a quien hace la petición.
+
+### Request
+
+```http
+POST http://localhost:8080/api/users/resend-verification
+```
+
+### Body
+
+```json
+{
+    "email": "natalia@gmail.com"
+}
+```
+
+### Respuesta
+
+```json
+{
+    "message": "If the email is registered and not yet verified, a verification code has been sent"
 }
 ```
 

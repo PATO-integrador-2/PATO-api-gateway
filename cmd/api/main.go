@@ -121,6 +121,11 @@ func main() {
 		)
 
 		publicUsers.POST(
+			"/resend-verification",
+			handlers.ProxyHandler(userProxy),
+		)
+
+		publicUsers.POST(
 			"/forgot-password",
 			handlers.ProxyHandler(userProxy),
 		)
@@ -256,9 +261,10 @@ func main() {
 			aiHandler.ExportPDF,
 		)
 
+		// Historia: Predecir y exportar a PDF en un solo paso (consume la API de IA)
 		protectedUsers.POST(
-			"/chat/ask",
-			aiHandler.Ask,
+			"/exports/pdf/:type",
+			aiHandler.ExportPredictionPDF,
 		)
 	}
 
