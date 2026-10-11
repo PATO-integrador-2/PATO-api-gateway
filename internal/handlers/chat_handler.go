@@ -15,8 +15,7 @@ import (
 )
 
 // ChatHandler gestiona la conexión WebSocket del chatbot: valida el token,
-// recibe mensajes del cliente y transmite en tiempo real la respuesta que
-// va generando el servicio de IA (vía streaming HTTP/SSE hacia el backend).
+// recibe mensajes del cliente y devuelve la respuesta del servicio de IA.
 type ChatHandler struct {
 	aiService   *services.AIService
 	authService *services.AuthService
@@ -110,6 +109,7 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 	go pingLoop(ctx, conn, &writeMu)
 
 	for {
+		// 1. Leer el mensaje entrante del cliente
 		var in incomingMessage
 		if err := conn.ReadJSON(&in); err != nil {
 			if websocket.IsUnexpectedCloseError(
@@ -122,27 +122,42 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 			return
 		}
 
+		// 2. Ignorar mensajes vacíos
 		if strings.TrimSpace(in.Message) == "" {
-			_ = writeJSON(outgoingMessage{Type: "error", Error: "mensaje vacío"})
+			_ = writeJSON(outgoingMessage{
+				Type:  "error",
+				Error: "mensaje vacío",
+			})
 			continue
 		}
 
-		payload := map[string]interface{}{
-			"userId":         userID,
-			"conversationId": in.ConversationID,
-			"message":        in.Message,
+		// 3. Llamar al servicio de IA (POST /ask)
+		askReq := services.AskRequest{
+			Question: in.Message,
+			Verbose:  false,
 		}
 
-		streamErr := h.aiService.StreamChat(ctx, payload, func(chunk services.ChatChunk) error {
-			if chunk.Done {
-				return writeJSON(outgoingMessage{Type: "done"})
-			}
-			return writeJSON(outgoingMessage{Type: "chunk", Content: chunk.Content})
-		})
+		result, err := h.aiService.Ask(ctx, userID, askReq)
+		if err != nil {
+			log.Printf("error llamando a IA (user=%s): %v", userID, err)
+			_ = writeJSON(outgoingMessage{
+				Type:  "error",
+				Error: "no se pudo generar la respuesta",
+			})
+			continue
+		}
 
-		if streamErr != nil && ctx.Err() == nil {
-			log.Printf("error en streaming de IA (user=%s): %v", userID, streamErr)
-			_ = writeJSON(outgoingMessage{Type: "error", Error: "no se pudo generar la respuesta"})
+		// 4. Mandar la respuesta completa como un solo chunk
+		if err := writeJSON(outgoingMessage{
+			Type:    "chunk",
+			Content: result.Answer,
+		}); err != nil {
+			return
+		}
+
+		// 5. Cerrar con done
+		if err := writeJSON(outgoingMessage{Type: "done"}); err != nil {
+			return
 		}
 	}
 }
