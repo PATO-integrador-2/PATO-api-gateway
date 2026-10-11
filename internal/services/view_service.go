@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 )
 
 type ViewService struct {
@@ -15,15 +16,51 @@ func NewViewService(db *sql.DB) *ViewService {
 }
 
 var allowedViews = map[string]bool{
-	"vw_ipm_by_domain":            true,
-	"vw_average_deprivations":     true,
-	"vw_deprivations_by_variable": true,
+	"vw_ipm_by_domain":                        true,
+	"vw_average_deprivations":                 true,
+	"vw_deprivations_by_variable":             true,
+	"vw_dashboard03_national_poverty":         true,
+	"vw_dashboard03_poverty_by_age":           true,
+	"vw_dashboard03_deprivation_contribution": true,
+	"vw_dimension_contribution":               true,
+	"vw_incidence_by_household_head_sex":      true,
+	"vw_incidence_by_person_sex":              true,
+	"vw_household_poverty_by_department":      true,
 }
 
 var allowedColumns = map[string]bool{
-	"anio":     true,
-	"dominio":  true,
-	"variable": true,
+	"anio":                           true,
+	"dominio":                        true,
+	"variable":                       true,
+	"area_geografica":                true,
+	"pais":                           true,
+	"grupo_erario":                   true,
+	"valor_porcentaje":               true,
+	"privacion":                      true,
+	"tipo_medida_pm":                 true,
+	"dimension":                      true,
+	"porcentaje":                     true,
+	"region":                         true,
+	"departamento":                   true,
+	"sexo":                           true,
+	"personas_que_habitan_ese_hogar": true,
+	"privacion_bajo_logro_educativo": true,
+	"privacion_analfabetismo":        true,
+	"privacion_inasistencia_escolar": true,
+	"privacion_rezago_escolar":       true,
+	"privacion_atencion_integral_primera_infancia": true,
+	"privacion_trabajo_infantil":                   true,
+	"privacion_no_aseguramiento_salud":             true,
+	"privacion_barreras_acceso_salud":              true,
+	"privacion_desempleo_larga_duracion":           true,
+	"privacion_tasa_empleo_formal":                 true,
+	"privacion_no_acceso_agua_mejorada":            true,
+	"privacion_inadecuada_eliminacion_excretas":    true,
+	"privacion_inadecuado_material_pisos":          true,
+	"privacion_inadecuado_material_paredes":        true,
+	"privacion_hacinamiento_critico":               true,
+	"ipm":                                          true,
+	"pobre":                                        true,
 }
 
 func (vs *ViewService) GetViewTotalData(viewName string) ([]map[string]interface{}, error) {
@@ -76,6 +113,57 @@ func (vs *ViewService) GetViewTotalData(viewName string) ([]map[string]interface
 	return results, nil
 }
 
+// GetDistinctColumnValues devuelve los valores únicos de una columna dentro de una vista,
+// usado para poblar filtros (categorías IPM, ubicación geográfica, etc.).
+func (vs *ViewService) GetDistinctColumnValues(viewName string, columnName string) ([]string, error) {
+	if !allowedViews[viewName] {
+		return nil, fmt.Errorf("vista no permitida: %s", viewName)
+	}
+
+	if !allowedColumns[columnName] {
+		return nil, fmt.Errorf("columna no permitida: %s", columnName)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL ORDER BY "%s" ASC`,
+		columnName,
+		viewName,
+		columnName,
+		columnName,
+	)
+
+	rows, err := vs.db.Query(query)
+	if err != nil {
+		log.Printf("Error executing query: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	values := make([]string, 0)
+
+	for rows.Next() {
+		var raw interface{}
+
+		if err := rows.Scan(&raw); err != nil {
+			log.Printf("Error scanning row: %v", err)
+			return nil, err
+		}
+
+		if raw == nil {
+			continue
+		}
+
+		values = append(values, fmt.Sprintf("%v", raw))
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error with rows: %v", err)
+		return nil, err
+	}
+
+	return values, nil
+}
+
 func (vs *ViewService) GetViewFilteredData(
 	viewName string,
 	columnName string,
@@ -103,6 +191,60 @@ func (vs *ViewService) GetViewFilteredData(
 	}
 	defer rows.Close()
 
+	return scanRows(rows)
+}
+
+// ColumnFilter representa un par columna/valor usado para filtrar una vista.
+type ColumnFilter struct {
+	ColumnName  string
+	ColumnValue string
+}
+
+// GetViewFilteredDataMulti filtra una vista por dos o más columnas a la vez
+// (ej. dominio + pais + anio), combinando las condiciones con AND.
+func (vs *ViewService) GetViewFilteredDataMulti(
+	viewName string,
+	filters []ColumnFilter,
+) ([]map[string]interface{}, error) {
+
+	if !allowedViews[viewName] {
+		return nil, fmt.Errorf("vista no permitida: %s", viewName)
+	}
+
+	if len(filters) == 0 {
+		return nil, fmt.Errorf("se requiere al menos un filtro")
+	}
+
+	conditions := make([]string, 0, len(filters))
+	args := make([]interface{}, 0, len(filters))
+
+	for i, f := range filters {
+		if !allowedColumns[f.ColumnName] {
+			return nil, fmt.Errorf("columna no permitida: %s", f.ColumnName)
+		}
+		conditions = append(conditions, fmt.Sprintf(`"%s" = $%d`, f.ColumnName, i+1))
+		args = append(args, f.ColumnValue)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT * FROM "%s" WHERE %s ORDER BY "anio" ASC`,
+		viewName,
+		strings.Join(conditions, " AND "),
+	)
+
+	rows, err := vs.db.Query(query, args...)
+	if err != nil {
+		log.Printf("Error executing query: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
+// scanRows vuelca las filas de un *sql.Rows en []map[string]interface{},
+// usando los nombres de columna como llaves.
+func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		log.Printf("Error getting columns: %v", err)

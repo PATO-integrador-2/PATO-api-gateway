@@ -66,6 +66,9 @@ func main() {
 		)
 	}
 
+	// Servicio para consumir la API de IA (predicciones)
+	aiService := services.NewAIService(cfg.AIService.BaseURL)
+
 	router := gin.Default()
 
 	// Middlewares generales
@@ -90,6 +93,7 @@ func main() {
 	// =========================
 
 	viewHandler := handlers.NewViewHandler(viewService)
+	aiHandler := handlers.NewAIHandler(aiService)
 
 	publicUsers := router.Group("/api/users")
 	{
@@ -109,7 +113,17 @@ func main() {
 		)
 
 		publicUsers.POST(
+			"/resend-verification",
+			handlers.ProxyHandler(userProxy),
+		)
+
+		publicUsers.POST(
 			"/forgot-password",
+			handlers.ProxyHandler(userProxy),
+		)
+
+		publicUsers.POST(
+			"/verify-reset-token",
 			handlers.ProxyHandler(userProxy),
 		)
 
@@ -152,6 +166,11 @@ func main() {
 		)
 
 		protectedUsers.PATCH(
+			"/username",
+			handlers.ProxyHandler(userProxy),
+		)
+
+		protectedUsers.PATCH(
 			"/password",
 			handlers.ProxyHandler(userProxy),
 		)
@@ -169,9 +188,75 @@ func main() {
 			handlers.ViewTotalHandler(viewService, "vw_deprivations_by_variable"),
 		)
 
+		protectedUsers.GET(
+			"/national-poverty",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"),
+		)
+
+		protectedUsers.GET(
+			"/poverty-by-age",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"),
+		)
+
+		protectedUsers.GET(
+			"/deprivations-contribution",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_deprivation_contribution"),
+		)
+
+		protectedUsers.GET(
+			"/dimension-contribution",
+			handlers.ViewTotalHandler(viewService, "vw_dimension_contribution"),
+		)
+
+		protectedUsers.GET(
+			"/incidence-by-household-head-sex",
+			handlers.ViewTotalHandler(viewService, "vw_incidence_by_household_head_sex"),
+		)
+
+		protectedUsers.GET(
+			"/incidence-by-person-sex",
+			handlers.ViewTotalHandler(viewService, "vw_incidence_by_person_sex"),
+		)
+
+		protectedUsers.GET(
+			"/household-poverty-by-department",
+			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
+		)
+
 		protectedUsers.POST(
 			"/filtered",
 			viewHandler.GetViewFilteredData,
+		)
+
+		// Historia: Filtrar por 2 o más categorías a la vez (ej. dominio + pais)
+		protectedUsers.POST(
+			"/filtered/multi",
+			viewHandler.GetViewFilteredDataMulti,
+		)
+
+		// Historia: Filtrar por categoría IPM / Filtrar por ubicación
+		// (obtiene los valores distintos de una columna para poblar los filtros)
+		protectedUsers.GET(
+			"/categories",
+			viewHandler.GetCategories,
+		)
+
+		// Historia: Visualizar predicción (consume la API de IA)
+		protectedUsers.POST(
+			"/predictions/:type",
+			aiHandler.Predict,
+		)
+
+		// Historia: Exportar datos de predicción a PDF (consume la API de IA)
+		protectedUsers.POST(
+			"/exports/pdf",
+			aiHandler.ExportPDF,
+		)
+
+		// Historia: Predecir y exportar a PDF en un solo paso (consume la API de IA)
+		protectedUsers.POST(
+			"/exports/pdf/:type",
+			aiHandler.ExportPredictionPDF,
 		)
 	}
 

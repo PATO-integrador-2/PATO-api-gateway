@@ -1,0 +1,147 @@
+package services
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+type AIService struct {
+	baseURL    string
+	httpClient *http.Client
+}
+
+func NewAIService(baseURL string) *AIService {
+	return &AIService{
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// Tipos soportados por la API de IA (src/api/main.py del servicio de predicción).
+var allowedPredictionTypes = map[string]bool{
+	"ipm":                   true,
+	"privacion":             true,
+	"porcentaje":            true,
+	"dimension":             true,
+	"incidence_by_sex":      true,
+	"incidence_by_head_sex": true,
+	"contribution_latam":    true,
+	"national_poverty":      true,
+	"poverty_by_age":        true,
+	"department_poverty":    true,
+	"multiple_departments":  true,
+	"household_poverty":     true,
+	"multiple_households":   true,
+}
+
+var ErrPredictionTypeNotAllowed = errors.New("tipo de predicción no permitido")
+
+type PredictionUpstreamError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *PredictionUpstreamError) Error() string {
+	return fmt.Sprintf("el servicio de IA respondió con error (%d): %s", e.StatusCode, e.Body)
+}
+
+func (ai *AIService) Predict(predictionType string, payload map[string]interface{}) (map[string]interface{}, error) {
+	if !allowedPredictionTypes[predictionType] {
+		return nil, ErrPredictionTypeNotAllowed
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("payload inválido: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/predict/%s", ai.baseURL, predictionType)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo construir la petición al servicio de IA: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ai.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo contactar al servicio de IA: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer la respuesta del servicio de IA: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, &PredictionUpstreamError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("respuesta inválida del servicio de IA: %w", err)
+	}
+
+	return result, nil
+}
+
+// postForBytes envía `payload` como JSON a `url` y devuelve el cuerpo de la
+// respuesta tal cual (sin decodificarlo), útil para respuestas binarias (PDF).
+func (ai *AIService) postForBytes(url string, payload map[string]interface{}) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("payload inválido: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo construir la petición al servicio de IA: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ai.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo contactar al servicio de IA: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer la respuesta del servicio de IA: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, &PredictionUpstreamError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+
+	return respBody, nil
+}
+
+// ExportPDF reenvía un conjunto de datos ya calculados (título + registros)
+// al servicio de IA para que genere el reporte, y devuelve el PDF crudo.
+// Útil cuando el cliente ya llamó antes a /predictions/:type y solo quiere
+// convertir ese `data` a PDF.
+func (ai *AIService) ExportPDF(payload map[string]interface{}) ([]byte, error) {
+	url := fmt.Sprintf("%s/export/pdf", ai.baseURL)
+	return ai.postForBytes(url, payload)
+}
+
+// ExportPredictionPDF pide al servicio de IA que calcule la predicción del
+// tipo indicado (mismos parámetros que Predict) y devuelva directamente el
+// PDF, sin que el cliente tenga que hacer dos llamadas.
+func (ai *AIService) ExportPredictionPDF(predictionType string, payload map[string]interface{}) ([]byte, error) {
+	if !allowedPredictionTypes[predictionType] {
+		return nil, ErrPredictionTypeNotAllowed
+	}
+
+	url := fmt.Sprintf("%s/export/pdf/%s", ai.baseURL, predictionType)
+	return ai.postForBytes(url, payload)
+}
