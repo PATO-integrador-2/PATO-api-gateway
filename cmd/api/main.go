@@ -69,6 +69,12 @@ func main() {
 	// Servicio para consumir la API de IA (predicciones)
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
 
+	chatHandler := handlers.NewChatHandler(
+		aiService,
+		authService,
+		cfg.CORS.AllowedOrigin,
+	)
+
 	router := gin.Default()
 
 	// Middlewares generales
@@ -78,6 +84,8 @@ func main() {
 			cfg.CORS.AllowedOrigin,
 		),
 	)
+
+	router.GET("/api/users/chat/ws", chatHandler.HandleChat)
 
 	// Health del Gateway
 	router.GET("/health", func(c *gin.Context) {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,82 @@ import (
 	"net/http"
 	"time"
 )
+
+// ---------- Tipos del endpoint /ask de FastAPI ----------
+
+type AskRequest struct {
+	Question string `json:"question"`
+	Verbose  bool   `json:"verbose,omitempty"`
+}
+
+type AskResponse struct {
+	Question     string                   `json:"question"`
+	Intent       string                   `json:"intent"`
+	IntentReason string                   `json:"intent_reason,omitempty"`
+	IntentMethod string                   `json:"intent_method,omitempty"`
+	Answer       string                   `json:"answer"`
+	Status       string                   `json:"status"`
+	Sources      []map[string]interface{} `json:"sources,omitempty"`
+	SQL          interface{}              `json:"sql,omitempty"`
+	Tokens       map[string]int           `json:"tokens,omitempty"`
+	LatencyMs    int                      `json:"latency_ms,omitempty"`
+}
+
+var askHTTPClient = &http.Client{
+	Timeout: 120 * time.Second,
+}
+
+func (ai *AIService) Ask(
+	ctx context.Context,
+	userID string,
+	req AskRequest,
+) (*AskResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("payload inválido: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/ask", ai.baseURL)
+
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		url,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo construir la petición al servicio de IA: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	if userID != "" {
+		httpReq.Header.Set("X-User-ID", userID)
+	}
+
+	resp, err := askHTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo contactar al servicio de IA: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer la respuesta del servicio de IA: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, &PredictionUpstreamError{
+			StatusCode: resp.StatusCode,
+			Body:       string(respBody),
+		}
+	}
+
+	var result AskResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("respuesta inválida del servicio de IA: %w", err)
+	}
+	return &result, nil
+}
 
 type AIService struct {
 	baseURL    string

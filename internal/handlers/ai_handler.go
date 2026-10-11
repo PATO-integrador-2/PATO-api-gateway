@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"backend/internal/services"
 
@@ -146,4 +147,54 @@ func (h *AIHandler) ExportPredictionPDF(c *gin.Context) {
 
 	c.Header("Content-Disposition", `attachment; filename="reporte.pdf"`)
 	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
+
+// Ask reenvía una pregunta al endpoint /ask del servicio de IA
+// y devuelve la respuesta del orquestador (data / simulation / rag / recommendation).
+func (h *AIHandler) Ask(c *gin.Context) {
+	var req services.AskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Datos inválidos: se requiere 'question'",
+		})
+		return
+	}
+
+	if strings.TrimSpace(req.Question) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "La pregunta no puede estar vacía",
+		})
+		return
+	}
+
+	// El AuthMiddleware dejó el userID en el contexto (c.Set("userID", ...)).
+	userID := ""
+	if v, ok := c.Get("userID"); ok {
+		if s, ok := v.(string); ok {
+			userID = s
+		}
+	}
+
+	data, err := h.aiService.Ask(c.Request.Context(), userID, req)
+	if err != nil {
+		var upstreamErr *services.PredictionUpstreamError
+
+		if errors.As(err, &upstreamErr) {
+			status := upstreamErr.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			c.JSON(status, gin.H{
+				"error": "El servicio de IA no pudo procesar la pregunta",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "No se pudo contactar al servicio de IA",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, data)
 }
