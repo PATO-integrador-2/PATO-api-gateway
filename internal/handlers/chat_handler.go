@@ -15,21 +15,22 @@ import (
 )
 
 // ChatHandler gestiona la conexión WebSocket del chatbot: valida el token,
-// recibe mensajes del cliente y devuelve la respuesta del servicio de IA.
+// recibe mensajes del cliente y devuelve la respuesta del servicio de IA
+// generativa (orquestador /ask).
 type ChatHandler struct {
-	aiService   *services.AIService
-	authService *services.AuthService
-	upgrader    websocket.Upgrader
+	chatbotService *services.ChatbotService
+	authService    *services.AuthService
+	upgrader       websocket.Upgrader
 }
 
 func NewChatHandler(
-	aiService *services.AIService,
+	chatbotService *services.ChatbotService,
 	authService *services.AuthService,
 	allowedOrigin string,
 ) *ChatHandler {
 	return &ChatHandler{
-		aiService:   aiService,
-		authService: authService,
+		chatbotService: chatbotService,
+		authService:    authService,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -58,8 +59,7 @@ type outgoingMessage struct {
 // mientras la conexión esté abierta (varios mensajes, uno tras otro).
 //
 // El token se recibe como query param (?token=...) porque el WebSocket
-// nativo del navegador no permite headers personalizados en el handshake,
-// así que no puede reusar directamente middleware.AuthMiddleware.
+// nativo del navegador no permite headers personalizados en el handshake.
 func (h *ChatHandler) HandleChat(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {
@@ -131,15 +131,15 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 			continue
 		}
 
-		// 3. Llamar al servicio de IA (POST /ask)
+		// 3. Llamar a la IA generativa (POST /ask)
 		askReq := services.AskRequest{
 			Question: in.Message,
 			Verbose:  false,
 		}
 
-		result, err := h.aiService.Ask(ctx, userID, askReq)
+		result, err := h.chatbotService.Ask(ctx, userID, askReq)
 		if err != nil {
-			log.Printf("error llamando a IA (user=%s): %v", userID, err)
+			log.Printf("error llamando a IA generativa (user=%s): %v", userID, err)
 			_ = writeJSON(outgoingMessage{
 				Type:  "error",
 				Error: "no se pudo generar la respuesta",
