@@ -66,11 +66,14 @@ func main() {
 		)
 	}
 
-	// Servicio para consumir la API de IA (predicciones)
+	// Servicio para consumir la API de IA (predicciones + PDF)
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
 
+	// Servicio para consumir la IA generativa (chatbot / orquestador)
+	chatbotService := services.NewChatbotService(cfg.GenerativeAI.BaseURL)
+
 	chatHandler := handlers.NewChatHandler(
-		aiService,
+		chatbotService,
 		authService,
 		cfg.CORS.AllowedOrigin,
 	)
@@ -121,11 +124,6 @@ func main() {
 		)
 
 		publicUsers.POST(
-			"/resend-verification",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
 			"/forgot-password",
 			handlers.ProxyHandler(userProxy),
 		)
@@ -139,7 +137,6 @@ func main() {
 			"/reset-password",
 			handlers.ProxyHandler(userProxy),
 		)
-
 	}
 
 	// =========================
@@ -260,12 +257,6 @@ func main() {
 			"/exports/pdf",
 			aiHandler.ExportPDF,
 		)
-
-		// Historia: Predecir y exportar a PDF en un solo paso (consume la API de IA)
-		protectedUsers.POST(
-			"/exports/pdf/:type",
-			aiHandler.ExportPredictionPDF,
-		)
 	}
 
 	addr := fmt.Sprintf(
@@ -285,5 +276,4 @@ func main() {
 			err,
 		)
 	}
-
 }

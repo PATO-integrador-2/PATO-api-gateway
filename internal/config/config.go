@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	Server      ServerConfig
-	UserService ServiceConfig
-	AIService   ServiceConfig
-	Valkey      ValkeyConfig
-	CORS        CORSConfig
+	Server       ServerConfig
+	UserService  ServiceConfig
+	AIService    ServiceConfig // predicciones + PDF
+	GenerativeAI ServiceConfig // chatbot / orquestador
+	Valkey       ValkeyConfig
+	CORS         CORSConfig
 }
 
 type ServerConfig struct {
@@ -60,6 +61,13 @@ func Load() (*Config, error) {
 			),
 		},
 
+		GenerativeAI: ServiceConfig{
+			BaseURL: getEnv(
+				"GENERATIVE_AI_SERVICE_URL",
+				"http://localhost:8010",
+			),
+		},
+
 		Valkey: ValkeyConfig{
 			Addr:     getEnv("APP_VALKEY_ADDR", "localhost:6379"),
 			Username: getEnv("APP_VALKEY_USER", ""),
@@ -82,7 +90,6 @@ func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
-
 	return defaultValue
 }
 
@@ -92,6 +99,5 @@ func getEnvInt(key string, defaultValue int) int {
 			return parsed
 		}
 	}
-
 	return defaultValue
 }
