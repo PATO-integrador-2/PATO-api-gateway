@@ -133,13 +133,26 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 		}
 
 		// 3. Llamar a la IA generativa (POST /ask)
+		conversationID := ""
+		if in.ConversationID != nil {
+			conversationID = strings.TrimSpace(*in.ConversationID)
+		}
+		if conversationID == "" {
+			conversationID, err = h.chatbotService.CreateConversation(ctx, userID, in.Message)
+			if err != nil {
+				log.Printf("error creando conversación (user=%s): %v", userID, err)
+				_ = writeJSON(outgoingMessage{
+					Type:  "error",
+					Error: "no se pudo crear la conversación",
+				})
+				continue
+			}
+		}
+
 		askReq := services.AskRequest{
 			Question:       in.Message,
-			ConversationID: in.ConversationID,
+			ConversationID: conversationID,
 			Verbose:        false,
-		}
-		if askReq.ConversationID != nil && strings.TrimSpace(*askReq.ConversationID) == "" {
-			askReq.ConversationID = nil
 		}
 
 		result, err := h.chatbotService.Ask(ctx, userID, askReq)
@@ -155,7 +168,7 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 		// 4. Mandar la respuesta completa como un solo chunk
 		if err := writeJSON(outgoingMessage{
 			Type:           "chunk",
-			ConversationID: result.ConversationID,
+			ConversationID: conversationID,
 			Content:        result.Answer,
 		}); err != nil {
 			return
@@ -164,7 +177,7 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 		// 5. Cerrar con done
 		if err := writeJSON(outgoingMessage{
 			Type:           "done",
-			ConversationID: result.ConversationID,
+			ConversationID: conversationID,
 		}); err != nil {
 			return
 		}

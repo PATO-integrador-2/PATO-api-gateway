@@ -70,7 +70,18 @@ func main() {
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
 
 	// Servicio para consumir la IA generativa (chatbot / orquestador)
-	chatbotService := services.NewChatbotService(cfg.GenerativeAI.BaseURL)
+	// Conexión a user_management_db para crear conversaciones del chat
+	var usersDB *sql.DB
+	if dsn := os.Getenv("USERS_DATABASE_URL"); dsn != "" {
+		usersDB, err = sql.Open("pgx", dsn)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer usersDB.Close()
+	} else {
+		log.Println("USERS_DATABASE_URL no configurada: el chat no podrá crear conversaciones nuevas")
+	}
+	chatbotService := services.NewChatbotService(cfg.GenerativeAI.BaseURL, usersDB)
 
 	chatHandler := handlers.NewChatHandler(
 		chatbotService,

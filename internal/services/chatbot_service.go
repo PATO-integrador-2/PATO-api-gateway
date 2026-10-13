@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,16 +24,39 @@ import (
 type ChatbotService struct {
 	baseURL    string
 	httpClient *http.Client
+	usersDB    *sql.DB // user_management_db; nil = no se pueden crear conversaciones
 }
 
-func NewChatbotService(baseURL string) *ChatbotService {
+func NewChatbotService(baseURL string, usersDB *sql.DB) *ChatbotService {
 	return &ChatbotService{
 		baseURL: baseURL,
+		usersDB: usersDB,
 		httpClient: &http.Client{
 			// El orquestador en CPU puede tardar 30–60s por pregunta.
 			Timeout: 120 * time.Second,
 		},
 	}
+}
+
+// CreateConversation crea una fila en ai_conversation (user_management_db)
+// y devuelve su id. El RAG exige un conversation_id existente.
+func (s *ChatbotService) CreateConversation(ctx context.Context, userID, firstMessage string) (string, error) {
+	if s.usersDB == nil {
+		return "", fmt.Errorf("USERS_DATABASE_URL no configurada")
+	}
+	name := []rune(strings.TrimSpace(firstMessage))
+	if len(name) > 60 {
+		name = name[:60]
+	}
+	var id string
+	err := s.usersDB.QueryRowContext(ctx,
+		`INSERT INTO ai_conversation (user_id, name) VALUES ($1, $2) RETURNING id`,
+		userID, string(name),
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo crear la conversación: %w", err)
+	}
+	return id, nil
 }
 
 // ============================================================
@@ -42,12 +66,11 @@ func NewChatbotService(baseURL string) *ChatbotService {
 type AskRequest struct {
 	Question       string  `json:"question"`
 	UserID         string  `json:"user_id"`
-	ConversationID *string `json:"conversation_id"` // nil = conversación nueva
+	ConversationID string `json:"conversation_id"`
 	Verbose        bool    `json:"verbose,omitempty"`
 }
 
 type AskResponse struct {
-	ConversationID string                   `json:"conversation_id"`
 	Question     string                   `json:"question"`
 	Intent       string                   `json:"intent"`
 	IntentReason string                   `json:"intent_reason,omitempty"`
