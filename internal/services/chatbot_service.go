@@ -40,11 +40,14 @@ func NewChatbotService(baseURL string) *ChatbotService {
 // ============================================================
 
 type AskRequest struct {
-	Question string `json:"question"`
-	Verbose  bool   `json:"verbose,omitempty"`
+	Question       string  `json:"question"`
+	UserID         string  `json:"user_id"`
+	ConversationID *string `json:"conversation_id"` // nil = conversación nueva
+	Verbose        bool    `json:"verbose,omitempty"`
 }
 
 type AskResponse struct {
+	ConversationID string                   `json:"conversation_id"`
 	Question     string                   `json:"question"`
 	Intent       string                   `json:"intent"`
 	IntentReason string                   `json:"intent_reason,omitempty"`
@@ -66,6 +69,7 @@ func (s *ChatbotService) Ask(
 	userID string,
 	req AskRequest,
 ) (*AskResponse, error) {
+	req.UserID = userID
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("payload inválido: %w", err)

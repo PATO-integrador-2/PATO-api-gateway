@@ -38,21 +38,22 @@ func NewChatHandler(
 				origin := r.Header.Get("Origin")
 				// Sin header Origin (clientes no-browser) se permite;
 				// si viene, debe coincidir con el origen configurado.
-				return origin == "" || origin == allowedOrigin
+				return origin == "" || allowedOrigin == "*" || origin == allowedOrigin
 			},
 		},
 	}
 }
 
 type incomingMessage struct {
-	ConversationID string `json:"conversationId"`
+	ConversationID *string `json:"conversationId"` // null = conversación nueva
 	Message        string `json:"message"`
 }
 
 type outgoingMessage struct {
-	Type    string `json:"type"` // "chunk" | "done" | "error"
-	Content string `json:"content,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Type           string `json:"type"` // "chunk" | "done" | "error"
+	ConversationID string `json:"conversationId,omitempty"`
+	Content        string `json:"content,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // HandleChat hace el upgrade a WebSocket y sirve la conversación completa
@@ -133,8 +134,12 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 
 		// 3. Llamar a la IA generativa (POST /ask)
 		askReq := services.AskRequest{
-			Question: in.Message,
-			Verbose:  false,
+			Question:       in.Message,
+			ConversationID: in.ConversationID,
+			Verbose:        false,
+		}
+		if askReq.ConversationID != nil && strings.TrimSpace(*askReq.ConversationID) == "" {
+			askReq.ConversationID = nil
 		}
 
 		result, err := h.chatbotService.Ask(ctx, userID, askReq)
@@ -149,14 +154,18 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 
 		// 4. Mandar la respuesta completa como un solo chunk
 		if err := writeJSON(outgoingMessage{
-			Type:    "chunk",
-			Content: result.Answer,
+			Type:           "chunk",
+			ConversationID: result.ConversationID,
+			Content:        result.Answer,
 		}); err != nil {
 			return
 		}
 
 		// 5. Cerrar con done
-		if err := writeJSON(outgoingMessage{Type: "done"}); err != nil {
+		if err := writeJSON(outgoingMessage{
+			Type:           "done",
+			ConversationID: result.ConversationID,
+		}); err != nil {
 			return
 		}
 	}
