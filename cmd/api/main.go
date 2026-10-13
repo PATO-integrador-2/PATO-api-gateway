@@ -228,6 +228,32 @@ func main() {
 			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
 		)
 
+		// Anexo departamental del IPM (DANE), una ruta por hoja
+		protectedUsers.GET(
+			"/ipm-departments",
+			handlers.DepartmentalHandler(viewService, "ipm_departamentos"),
+		)
+
+		protectedUsers.GET(
+			"/ipm-department-indicators",
+			handlers.DepartmentalHandler(viewService, "ipm_indicadores_departamento"),
+		)
+
+		protectedUsers.GET(
+			"/adjusted-ipm-incidence",
+			handlers.DepartmentalHandler(viewService, "incidencia_ajustada_ipm"),
+		)
+
+		protectedUsers.GET(
+			"/ipm-department-sex",
+			handlers.DepartmentalHandler(viewService, "ipm_sexo"),
+		)
+
+		protectedUsers.GET(
+			"/adjusted-ipm-contributions",
+			handlers.DepartmentalHandler(viewService, "contribuciones_ia_ipm"),
+		)
+
 		protectedUsers.POST(
 			"/filtered",
 			viewHandler.GetViewFilteredData,
