@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"time"
 
 	"backend/internal/config"
 	"backend/internal/database"
@@ -31,7 +34,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	viewService := services.NewViewService(db)
+	// Pool acotado: evita que ráfagas de requests abran conexiones sin límite.
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	// pprof solo si PPROF_ADDR está definido (ej. localhost:6060).
+	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
+		go func() {
+			log.Printf("pprof escuchando en %s", addr)
+			log.Println(http.ListenAndServe(addr, nil))
+		}()
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -48,6 +62,8 @@ func main() {
 			err,
 		)
 	}
+
+	viewService := services.NewViewService(db, valkeyClient)
 
 	// Servicio encargado de validar tokens
 	authService := services.NewAuthService(

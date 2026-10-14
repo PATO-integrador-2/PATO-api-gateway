@@ -54,7 +54,7 @@ func ViewTotalHandler(viewService *services.ViewService, viewName string) gin.Ha
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve data"})
 			return
 		}
-		c.JSON(http.StatusOK, data)
+		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 	}
 }
 
@@ -95,7 +95,7 @@ func (h *ViewHandler) GetViewFilteredData(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, data)
+	c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 }
 
 // GetViewFilteredDataMulti filtra una vista por dos o más categorías a la vez
@@ -126,7 +126,7 @@ func (h *ViewHandler) GetViewFilteredDataMulti(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, data)
+	c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 }
 
 // GetCategories devuelve los valores distintos de una columna dentro de una vista,

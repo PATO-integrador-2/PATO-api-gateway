@@ -1,18 +1,35 @@
 package services
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
+)
+
+const (
+	// Las vistas son datos analíticos que cambian muy poco: se cachea el JSON
+	// ya serializado para no volver a leer ni materializar la vista en cada request.
+	viewCacheTTL  = 10 * time.Minute
+	viewQueryTime = 30 * time.Second
 )
 
 type ViewService struct {
-	db *sql.DB
+	db    *sql.DB
+	cache *redis.Client
+	group singleflight.Group
 }
 
-func NewViewService(db *sql.DB) *ViewService {
-	return &ViewService{db: db}
+// NewViewService crea el servicio. cache puede ser nil (sin caché).
+func NewViewService(db *sql.DB, cache *redis.Client) *ViewService {
+	return &ViewService{db: db, cache: cache}
 }
 
 var allowedViews = map[string]bool{
@@ -63,54 +80,49 @@ var allowedColumns = map[string]bool{
 	"pobre":                                        true,
 }
 
-func (vs *ViewService) GetViewTotalData(viewName string) ([]map[string]interface{}, error) {
+// cached devuelve el JSON cacheado para key o lo carga con load. Las cargas
+// concurrentes de la misma key se colapsan en una sola consulta (singleflight).
+// Un fallo del caché nunca rompe la request: se cae a la base de datos.
+func (vs *ViewService) cached(key string, load func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	ctx := context.Background()
+
+	if vs.cache != nil {
+		if b, err := vs.cache.Get(ctx, key).Bytes(); err == nil {
+			return b, nil
+		}
+	}
+
+	v, err, _ := vs.group.Do(key, func() (interface{}, error) {
+		qctx, cancel := context.WithTimeout(ctx, viewQueryTime)
+		defer cancel()
+
+		b, err := load(qctx)
+		if err != nil {
+			return nil, err
+		}
+		if vs.cache != nil {
+			if err := vs.cache.Set(ctx, key, b, viewCacheTTL).Err(); err != nil {
+				log.Printf("Error guardando %s en caché: %v", key, err)
+			}
+		}
+		return b, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
+}
+
+// GetViewTotalData devuelve el JSON (array de objetos) de toda la vista.
+func (vs *ViewService) GetViewTotalData(viewName string) ([]byte, error) {
 	if !allowedViews[viewName] {
 		return nil, fmt.Errorf("vista no permitida: %s", viewName)
 	}
-	query := fmt.Sprintf(
-		`SELECT * FROM "%s" ORDER BY "anio" ASC`,
-		viewName,
-	)
 
-	rows, err := vs.db.Query(query)
-	if err != nil {
-		log.Printf("Error executing query: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		log.Printf("Error getting columns: %v", err)
-		return nil, err
-	}
-
-	var results []map[string]interface{}
-	for rows.Next() {
-		rowData := make([]interface{}, len(columns))
-		rowPointers := make([]interface{}, len(columns))
-		for i := range rowData {
-			rowPointers[i] = &rowData[i]
-		}
-
-		if err := rows.Scan(rowPointers...); err != nil {
-			log.Printf("Error scanning row: %v", err)
-			return nil, err
-		}
-
-		rowMap := make(map[string]interface{})
-		for i, col := range columns {
-			rowMap[col] = rowData[i]
-		}
-		results = append(results, rowMap)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error with rows: %v", err)
-		return nil, err
-	}
-
-	return results, nil
+	return vs.cached("view:total:"+viewName, func(ctx context.Context) ([]byte, error) {
+		query := fmt.Sprintf(`SELECT * FROM "%s" ORDER BY "anio" ASC`, viewName)
+		return vs.queryJSON(ctx, query)
+	})
 }
 
 // GetDistinctColumnValues devuelve los valores únicos de una columna dentro de una vista,
@@ -124,43 +136,45 @@ func (vs *ViewService) GetDistinctColumnValues(viewName string, columnName strin
 		return nil, fmt.Errorf("columna no permitida: %s", columnName)
 	}
 
-	query := fmt.Sprintf(
-		`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL ORDER BY "%s" ASC`,
-		columnName,
-		viewName,
-		columnName,
-		columnName,
-	)
+	raw, err := vs.cached("view:cat:"+viewName+":"+columnName, func(ctx context.Context) ([]byte, error) {
+		query := fmt.Sprintf(
+			`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL ORDER BY "%s" ASC`,
+			columnName, viewName, columnName, columnName,
+		)
 
-	rows, err := vs.db.Query(query)
-	if err != nil {
-		log.Printf("Error executing query: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	values := make([]string, 0)
-
-	for rows.Next() {
-		var raw interface{}
-
-		if err := rows.Scan(&raw); err != nil {
-			log.Printf("Error scanning row: %v", err)
+		rows, err := vs.db.QueryContext(ctx, query)
+		if err != nil {
+			log.Printf("Error executing query: %v", err)
 			return nil, err
 		}
+		defer rows.Close()
 
-		if raw == nil {
-			continue
+		values := make([]string, 0)
+		for rows.Next() {
+			var v interface{}
+			if err := rows.Scan(&v); err != nil {
+				log.Printf("Error scanning row: %v", err)
+				return nil, err
+			}
+			if v == nil {
+				continue
+			}
+			values = append(values, fmt.Sprintf("%v", v))
 		}
-
-		values = append(values, fmt.Sprintf("%v", raw))
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error with rows: %v", err)
+		if err := rows.Err(); err != nil {
+			log.Printf("Error with rows: %v", err)
+			return nil, err
+		}
+		return json.Marshal(values)
+	})
+	if err != nil {
 		return nil, err
 	}
 
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
 	return values, nil
 }
 
@@ -168,7 +182,7 @@ func (vs *ViewService) GetViewFilteredData(
 	viewName string,
 	columnName string,
 	columnValue string,
-) ([]map[string]interface{}, error) {
+) ([]byte, error) {
 
 	if !allowedViews[viewName] {
 		return nil, fmt.Errorf("vista no permitida: %s", viewName)
@@ -178,20 +192,14 @@ func (vs *ViewService) GetViewFilteredData(
 		return nil, fmt.Errorf("columna no permitida: %s", columnName)
 	}
 
-	query := fmt.Sprintf(
-		`SELECT * FROM "%s" WHERE "%s" = $1 ORDER BY "anio" ASC`,
-		viewName,
-		columnName,
-	)
-
-	rows, err := vs.db.Query(query, columnValue)
-	if err != nil {
-		log.Printf("Error executing query: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	return scanRows(rows)
+	key := fmt.Sprintf("view:filter:%s:%s=%s", viewName, columnName, columnValue)
+	return vs.cached(key, func(ctx context.Context) ([]byte, error) {
+		query := fmt.Sprintf(
+			`SELECT * FROM "%s" WHERE "%s" = $1 ORDER BY "anio" ASC`,
+			viewName, columnName,
+		)
+		return vs.queryJSON(ctx, query, columnValue)
+	})
 }
 
 // ColumnFilter representa un par columna/valor usado para filtrar una vista.
@@ -205,7 +213,7 @@ type ColumnFilter struct {
 func (vs *ViewService) GetViewFilteredDataMulti(
 	viewName string,
 	filters []ColumnFilter,
-) ([]map[string]interface{}, error) {
+) ([]byte, error) {
 
 	if !allowedViews[viewName] {
 		return nil, fmt.Errorf("vista no permitida: %s", viewName)
@@ -217,6 +225,7 @@ func (vs *ViewService) GetViewFilteredDataMulti(
 
 	conditions := make([]string, 0, len(filters))
 	args := make([]interface{}, 0, len(filters))
+	keyParts := make([]string, 0, len(filters))
 
 	for i, f := range filters {
 		if !allowedColumns[f.ColumnName] {
@@ -224,6 +233,7 @@ func (vs *ViewService) GetViewFilteredDataMulti(
 		}
 		conditions = append(conditions, fmt.Sprintf(`"%s" = $%d`, f.ColumnName, i+1))
 		args = append(args, f.ColumnValue)
+		keyParts = append(keyParts, f.ColumnName+"="+f.ColumnValue)
 	}
 
 	query := fmt.Sprintf(
@@ -232,47 +242,61 @@ func (vs *ViewService) GetViewFilteredDataMulti(
 		strings.Join(conditions, " AND "),
 	)
 
-	rows, err := vs.db.Query(query, args...)
+	key := "view:multi:" + viewName + ":" + strings.Join(keyParts, "&")
+	return vs.cached(key, func(ctx context.Context) ([]byte, error) {
+		return vs.queryJSON(ctx, query, args...)
+	})
+}
+
+// queryJSON ejecuta la consulta y serializa cada fila a JSON a medida que la
+// lee, sin acumular un []map[string]interface{} con todo el resultado.
+func (vs *ViewService) queryJSON(ctx context.Context, query string, args ...interface{}) ([]byte, error) {
+	rows, err := vs.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		log.Printf("Error executing query: %v", err)
 		return nil, err
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
-}
-
-// scanRows vuelca las filas de un *sql.Rows en []map[string]interface{},
-// usando los nombres de columna como llaves.
-func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		log.Printf("Error getting columns: %v", err)
 		return nil, err
 	}
 
-	var results []map[string]interface{}
+	// Estructuras reutilizadas para todas las filas.
+	rowData := make([]interface{}, len(columns))
+	rowPointers := make([]interface{}, len(columns))
+	for i := range rowData {
+		rowPointers[i] = &rowData[i]
+	}
+	rowMap := make(map[string]interface{}, len(columns))
 
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	buf.WriteByte('[')
+
+	first := true
 	for rows.Next() {
-		rowData := make([]interface{}, len(columns))
-		rowPointers := make([]interface{}, len(columns))
-
-		for i := range rowData {
-			rowPointers[i] = &rowData[i]
-		}
-
 		if err := rows.Scan(rowPointers...); err != nil {
 			log.Printf("Error scanning row: %v", err)
 			return nil, err
 		}
 
-		rowMap := make(map[string]interface{})
-
 		for i, col := range columns {
 			rowMap[col] = rowData[i]
 		}
 
-		results = append(results, rowMap)
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+
+		if err := enc.Encode(rowMap); err != nil {
+			return nil, err
+		}
+		// Encode añade '\n' al final de cada valor.
+		buf.Truncate(buf.Len() - 1)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -280,5 +304,6 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	return results, nil
+	buf.WriteByte(']')
+	return buf.Bytes(), nil
 }
