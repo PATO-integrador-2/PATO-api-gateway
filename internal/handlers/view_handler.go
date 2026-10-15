@@ -68,6 +68,9 @@ func DepartmentalHandler(viewService *services.ViewService, name string) gin.Han
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve data"})
 			return
 		}
+		if data == nil {
+			data = []map[string]interface{}{}
+		}
 		c.JSON(http.StatusOK, data)
 	}
 }

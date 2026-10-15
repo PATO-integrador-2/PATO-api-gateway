@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -131,4 +132,45 @@ func (vs *ViewService) GetDepartmentalData(name string, department string) ([]ma
 	defer rows.Close()
 
 	return scanRows(rows)
+}
+
+// scanRows vuelca las filas de un *sql.Rows en []map[string]interface{},
+// usando los nombres de columna como llaves.
+func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		log.Printf("Error getting columns: %v", err)
+		return nil, err
+	}
+
+	var results []map[string]interface{}
+
+	for rows.Next() {
+		rowData := make([]interface{}, len(columns))
+		rowPointers := make([]interface{}, len(columns))
+
+		for i := range rowData {
+			rowPointers[i] = &rowData[i]
+		}
+
+		if err := rows.Scan(rowPointers...); err != nil {
+			log.Printf("Error scanning row: %v", err)
+			return nil, err
+		}
+
+		rowMap := make(map[string]interface{})
+
+		for i, col := range columns {
+			rowMap[col] = rowData[i]
+		}
+
+		results = append(results, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error with rows: %v", err)
+		return nil, err
+	}
+
+	return results, nil
 }
