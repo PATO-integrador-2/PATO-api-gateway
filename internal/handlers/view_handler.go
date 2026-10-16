@@ -59,11 +59,11 @@ func ViewTotalHandler(viewService *services.ViewService, viewName string) gin.Ha
 }
 
 // DepartmentalHandler devuelve una hoja del anexo departamental del IPM.
-// Acepta ?departamento=<nombre> (sin importar tildes, mayúsculas ni
-// puntos: "Bogotá D.C." = "bogota dc").
+// El departamento va en la ruta (/:departamento), sin importar tildes,
+// mayúsculas ni puntos: "Bogotá D.C." = "bogota dc". Sin él devuelve todos.
 func DepartmentalHandler(viewService *services.ViewService, name string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		data, err := viewService.GetDepartmentalData(name, c.Query("departamento"))
+		data, err := viewService.GetDepartmentalData(name, c.Param("departamento"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve data"})
 			return

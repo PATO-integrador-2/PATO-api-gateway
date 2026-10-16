@@ -255,31 +255,21 @@ func main() {
 			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
 		)
 
-		// Anexo departamental del IPM (DANE), una ruta por hoja
-		protectedUsers.GET(
-			"/ipm-departments",
-			handlers.DepartmentalHandler(viewService, "ipm_departamentos"),
-		)
+		// Anexo departamental del IPM (DANE), una ruta por hoja. Cada una
+		// responde la lista completa y también /<ruta>/:departamento.
+		departmentalRoutes := map[string]string{
+			"/ipm-departments":            "ipm_departamentos",
+			"/ipm-department-indicators":  "ipm_indicadores_departamento",
+			"/adjusted-ipm-incidence":     "incidencia_ajustada_ipm",
+			"/ipm-department-sex":         "ipm_sexo",
+			"/adjusted-ipm-contributions": "contribuciones_ia_ipm",
+		}
 
-		protectedUsers.GET(
-			"/ipm-department-indicators",
-			handlers.DepartmentalHandler(viewService, "ipm_indicadores_departamento"),
-		)
-
-		protectedUsers.GET(
-			"/adjusted-ipm-incidence",
-			handlers.DepartmentalHandler(viewService, "incidencia_ajustada_ipm"),
-		)
-
-		protectedUsers.GET(
-			"/ipm-department-sex",
-			handlers.DepartmentalHandler(viewService, "ipm_sexo"),
-		)
-
-		protectedUsers.GET(
-			"/adjusted-ipm-contributions",
-			handlers.DepartmentalHandler(viewService, "contribuciones_ia_ipm"),
-		)
+		for path, sheet := range departmentalRoutes {
+			handler := handlers.DepartmentalHandler(viewService, sheet)
+			protectedUsers.GET(path, handler)
+			protectedUsers.GET(path+"/:departamento", handler)
+		}
 
 		protectedUsers.POST(
 			"/filtered",
