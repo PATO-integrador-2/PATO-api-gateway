@@ -14,6 +14,7 @@ type Config struct {
 	GenerativeAI ServiceConfig // chatbot / orquestador
 	Valkey       ValkeyConfig
 	CORS         CORSConfig
+	UsersDB      DatabaseConfig // NEW
 }
 
 type ServerConfig struct {
@@ -35,6 +36,10 @@ type ValkeyConfig struct {
 
 type CORSConfig struct {
 	AllowedOrigin string
+}
+
+type DatabaseConfig struct {
+	URL string
 }
 
 func Load() (*Config, error) {
@@ -80,6 +85,12 @@ func Load() (*Config, error) {
 				"APP_CORS_ORIGIN",
 				"http://localhost:3000",
 			),
+		},
+
+		// NEW: cadena de conexión a user_management_db.
+		// Si está vacía, main.go reutiliza DATABASE_URL.
+		UsersDB: DatabaseConfig{
+			URL: getEnv("USERS_DATABASE_URL", ""),
 		},
 	}
 
