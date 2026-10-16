@@ -35,8 +35,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	viewService := services.NewViewService(db)
-
 	// ============================================================
 	// 2. Configuración
 	// ============================================================
@@ -46,7 +44,15 @@ func main() {
 	}
 
 	// ============================================================
-	// 3. Base de datos de usuarios (user_management_db)
+	// 3. Valkey (necesario antes de viewService y authService)
+	// ============================================================
+	valkeyClient, err := database.ConnectValkey(cfg)
+	if err != nil {
+		log.Fatalf("Failed to connect to valkey: %v", err)
+	}
+
+	// ============================================================
+	// 4. Base de datos de usuarios (user_management_db)
 	//    Si no hay USERS_DATABASE_URL, reutilizamos DATABASE_URL.
 	// ============================================================
 	usersDBURL := cfg.UsersDB.URL
@@ -61,19 +67,19 @@ func main() {
 	}
 	defer usersDB.Close()
 
+	// ============================================================
+	// 5. Servicios y repositorios
+	// ============================================================
 	if err := usersDB.Ping(); err != nil {
 		log.Fatalf("Failed to ping users database: %v", err)
 	}
 
-	// ============================================================
-	// 4. Servicios y repositorios
-	// ============================================================
-	valkeyClient, err := database.ConnectValkey(cfg)
-	if err != nil {
-		log.Fatalf("Failed to connect to valkey: %v", err)
-	}
+	viewService := services.NewViewService(db)
 
-	authService := services.NewAuthService(valkeyClient)
+	// Servicio encargado de validar tokens
+	authService := services.NewAuthService(
+		valkeyClient,
+	)
 
 	userProxy, err := proxy.NewReverseProxy(cfg.UserService.BaseURL)
 	if err != nil {
@@ -89,12 +95,12 @@ func main() {
 		cfg.CORS.AllowedOrigin,
 	)
 
-	// NEW: repositorio y handler de conversaciones
+	// Repositorio y handler de conversaciones
 	conversationRepo := repository.NewConversationRepository(usersDB)
 	conversationHandler := handlers.NewConversationHandler(conversationRepo)
 
 	// ============================================================
-	// 5. Router
+	// 6. Router
 	// ============================================================
 	router := gin.Default()
 
@@ -114,7 +120,7 @@ func main() {
 	router.GET("/api/users/chat/ws", chatHandler.HandleChat)
 
 	// ============================================================
-	// 6. Rutas públicas
+	// 7. Rutas públicas
 	// ============================================================
 	viewHandler := handlers.NewViewHandler(viewService)
 	aiHandler := handlers.NewAIHandler(aiService)
@@ -130,7 +136,7 @@ func main() {
 	}
 
 	// ============================================================
-	// 7. Rutas protegidas
+	// 8. Rutas protegidas
 	// ============================================================
 	protectedUsers := router.Group("/api/users")
 	protectedUsers.Use(middleware.AuthMiddleware(authService))
@@ -173,7 +179,7 @@ func main() {
 	}
 
 	// ============================================================
-	// 8. NUEVO: Conversaciones (protegido con el mismo middleware)
+	// 9. Conversaciones (protegido con el mismo middleware)
 	// ============================================================
 	protectedConversations := router.Group("/api/conversations")
 	protectedConversations.Use(middleware.AuthMiddleware(authService))
@@ -184,7 +190,7 @@ func main() {
 	}
 
 	// ============================================================
-	// 9. Arrancar
+	// 10. Arrancar
 	// ============================================================
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("Starting %s on %s", cfg.Server.Name, addr)
