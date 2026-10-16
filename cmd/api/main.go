@@ -11,6 +11,7 @@ import (
 	"backend/internal/handlers"
 	"backend/internal/middleware"
 	"backend/internal/proxy"
+	"backend/internal/repository"
 	"backend/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,9 @@ import (
 func main() {
 	godotenv.Load()
 
+	// ============================================================
+	// 1. Base de datos principal (clean_data_db / DANE views)
+	// ============================================================
 	db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatal(err)
@@ -33,43 +37,50 @@ func main() {
 
 	viewService := services.NewViewService(db)
 
+	// ============================================================
+	// 2. Configuración
+	// ============================================================
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf(
-			"Failed to load configuration: %v",
-			err,
-		)
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// ============================================================
+	// 3. Base de datos de usuarios (user_management_db)
+	//    Si no hay USERS_DATABASE_URL, reutilizamos DATABASE_URL.
+	// ============================================================
+	usersDBURL := cfg.UsersDB.URL
+	if usersDBURL == "" {
+		usersDBURL = os.Getenv("DATABASE_URL")
+		log.Println("[warn] USERS_DATABASE_URL no definida; reutilizando DATABASE_URL para conversaciones")
+	}
+
+	usersDB, err := sql.Open("pgx", usersDBURL)
+	if err != nil {
+		log.Fatalf("Failed to open users database: %v", err)
+	}
+	defer usersDB.Close()
+
+	if err := usersDB.Ping(); err != nil {
+		log.Fatalf("Failed to ping users database: %v", err)
+	}
+
+	// ============================================================
+	// 4. Servicios y repositorios
+	// ============================================================
 	valkeyClient, err := database.ConnectValkey(cfg)
 	if err != nil {
-		log.Fatalf(
-			"Failed to connect to valkey: %v",
-			err,
-		)
+		log.Fatalf("Failed to connect to valkey: %v", err)
 	}
 
-	// Servicio encargado de validar tokens
-	authService := services.NewAuthService(
-		valkeyClient,
-	)
+	authService := services.NewAuthService(valkeyClient)
 
-	// Proxy hacia user-service
-	userProxy, err := proxy.NewReverseProxy(
-		cfg.UserService.BaseURL,
-	)
-
+	userProxy, err := proxy.NewReverseProxy(cfg.UserService.BaseURL)
 	if err != nil {
-		log.Fatalf(
-			"Failed to create user service proxy: %v",
-			err,
-		)
+		log.Fatalf("Failed to create user service proxy: %v", err)
 	}
 
-	// Servicio para consumir la API de IA (predicciones + PDF)
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
-
-	// Servicio para consumir la IA generativa (chatbot / orquestador)
 	chatbotService := services.NewChatbotService(cfg.GenerativeAI.BaseURL)
 
 	chatHandler := handlers.NewChatHandler(
@@ -78,202 +89,107 @@ func main() {
 		cfg.CORS.AllowedOrigin,
 	)
 
+	// NEW: repositorio y handler de conversaciones
+	conversationRepo := repository.NewConversationRepository(usersDB)
+	conversationHandler := handlers.NewConversationHandler(conversationRepo)
+
+	// ============================================================
+	// 5. Router
+	// ============================================================
 	router := gin.Default()
 
-	// Middlewares generales
 	router.Use(
 		middleware.RequestID(),
-		middleware.CORS(
-			cfg.CORS.AllowedOrigin,
-		),
+		middleware.CORS(cfg.CORS.AllowedOrigin),
 	)
 
-	router.GET("/api/users/chat/ws", chatHandler.HandleChat)
-
-	// Health del Gateway
 	router.GET("/health", func(c *gin.Context) {
-
 		c.JSON(200, gin.H{
 			"status": "healthy",
 			"app":    cfg.Server.Name,
 		})
 	})
 
-	// =========================
-	// RUTAS PÚBLICAS
-	// =========================
+	// WebSocket del chat (valida token manualmente dentro del handler)
+	router.GET("/api/users/chat/ws", chatHandler.HandleChat)
 
+	// ============================================================
+	// 6. Rutas públicas
+	// ============================================================
 	viewHandler := handlers.NewViewHandler(viewService)
 	aiHandler := handlers.NewAIHandler(aiService)
 
 	publicUsers := router.Group("/api/users")
 	{
-		publicUsers.POST(
-			"/register",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
-			"/login",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
-			"/verify-email",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
-			"/forgot-password",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
-			"/verify-reset-token",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		publicUsers.POST(
-			"/reset-password",
-			handlers.ProxyHandler(userProxy),
-		)
+		publicUsers.POST("/register", handlers.ProxyHandler(userProxy))
+		publicUsers.POST("/login", handlers.ProxyHandler(userProxy))
+		publicUsers.POST("/verify-email", handlers.ProxyHandler(userProxy))
+		publicUsers.POST("/forgot-password", handlers.ProxyHandler(userProxy))
+		publicUsers.POST("/verify-reset-token", handlers.ProxyHandler(userProxy))
+		publicUsers.POST("/reset-password", handlers.ProxyHandler(userProxy))
 	}
 
-	// =========================
-	// RUTAS PROTEGIDAS
-	// =========================
-
+	// ============================================================
+	// 7. Rutas protegidas
+	// ============================================================
 	protectedUsers := router.Group("/api/users")
-
-	protectedUsers.Use(
-		middleware.AuthMiddleware(authService),
-	)
-
+	protectedUsers.Use(middleware.AuthMiddleware(authService))
 	{
-		protectedUsers.GET(
-			"",
-			handlers.ProxyHandler(userProxy),
-		)
+		protectedUsers.GET("", handlers.ProxyHandler(userProxy))
+		protectedUsers.GET("/me", handlers.ProxyHandler(userProxy))
+		protectedUsers.POST("/logout", handlers.ProxyHandler(userProxy))
+		protectedUsers.PATCH("/email", handlers.ProxyHandler(userProxy))
+		protectedUsers.PATCH("/username", handlers.ProxyHandler(userProxy))
+		protectedUsers.PATCH("/password", handlers.ProxyHandler(userProxy))
 
-		protectedUsers.GET(
-			"/me",
-			handlers.ProxyHandler(userProxy),
-		)
+		// Vistas IPM
+		protectedUsers.GET("/ipm-by-domain",
+			handlers.ViewTotalHandler(viewService, "vw_ipm_by_domain"))
+		protectedUsers.GET("/average-deprivations",
+			handlers.ViewTotalHandler(viewService, "vw_average_deprivations"))
+		protectedUsers.GET("/deprivations-by-variable",
+			handlers.ViewTotalHandler(viewService, "vw_deprivations_by_variable"))
+		protectedUsers.GET("/national-poverty",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"))
+		protectedUsers.GET("/poverty-by-age",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"))
+		protectedUsers.GET("/deprivations-contribution",
+			handlers.ViewTotalHandler(viewService, "vw_dashboard03_deprivation_contribution"))
+		protectedUsers.GET("/dimension-contribution",
+			handlers.ViewTotalHandler(viewService, "vw_dimension_contribution"))
+		protectedUsers.GET("/incidence-by-household-head-sex",
+			handlers.ViewTotalHandler(viewService, "vw_incidence_by_household_head_sex"))
+		protectedUsers.GET("/incidence-by-person-sex",
+			handlers.ViewTotalHandler(viewService, "vw_incidence_by_person_sex"))
+		protectedUsers.GET("/household-poverty-by-department",
+			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"))
 
-		protectedUsers.POST(
-			"/logout",
-			handlers.ProxyHandler(userProxy),
-		)
+		protectedUsers.POST("/filtered", viewHandler.GetViewFilteredData)
+		protectedUsers.POST("/filtered/multi", viewHandler.GetViewFilteredDataMulti)
+		protectedUsers.GET("/categories", viewHandler.GetCategories)
 
-		protectedUsers.PATCH(
-			"/email",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		protectedUsers.PATCH(
-			"/username",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		protectedUsers.PATCH(
-			"/password",
-			handlers.ProxyHandler(userProxy),
-		)
-
-		protectedUsers.GET(
-			"/ipm-by-domain",
-			handlers.ViewTotalHandler(viewService, "vw_ipm_by_domain"),
-		)
-		protectedUsers.GET(
-			"/average-deprivations",
-			handlers.ViewTotalHandler(viewService, "vw_average_deprivations"),
-		)
-		protectedUsers.GET(
-			"/deprivations-by-variable",
-			handlers.ViewTotalHandler(viewService, "vw_deprivations_by_variable"),
-		)
-
-		protectedUsers.GET(
-			"/national-poverty",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"),
-		)
-
-		protectedUsers.GET(
-			"/poverty-by-age",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"),
-		)
-
-		protectedUsers.GET(
-			"/deprivations-contribution",
-			handlers.ViewTotalHandler(viewService, "vw_dashboard03_deprivation_contribution"),
-		)
-
-		protectedUsers.GET(
-			"/dimension-contribution",
-			handlers.ViewTotalHandler(viewService, "vw_dimension_contribution"),
-		)
-
-		protectedUsers.GET(
-			"/incidence-by-household-head-sex",
-			handlers.ViewTotalHandler(viewService, "vw_incidence_by_household_head_sex"),
-		)
-
-		protectedUsers.GET(
-			"/incidence-by-person-sex",
-			handlers.ViewTotalHandler(viewService, "vw_incidence_by_person_sex"),
-		)
-
-		protectedUsers.GET(
-			"/household-poverty-by-department",
-			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
-		)
-
-		protectedUsers.POST(
-			"/filtered",
-			viewHandler.GetViewFilteredData,
-		)
-
-		// Historia: Filtrar por 2 o más categorías a la vez (ej. dominio + pais)
-		protectedUsers.POST(
-			"/filtered/multi",
-			viewHandler.GetViewFilteredDataMulti,
-		)
-
-		// Historia: Filtrar por categoría IPM / Filtrar por ubicación
-		// (obtiene los valores distintos de una columna para poblar los filtros)
-		protectedUsers.GET(
-			"/categories",
-			viewHandler.GetCategories,
-		)
-
-		// Historia: Visualizar predicción (consume la API de IA)
-		protectedUsers.POST(
-			"/predictions/:type",
-			aiHandler.Predict,
-		)
-
-		// Historia: Exportar datos de predicción a PDF (consume la API de IA)
-		protectedUsers.POST(
-			"/exports/pdf",
-			aiHandler.ExportPDF,
-		)
+		protectedUsers.POST("/predictions/:type", aiHandler.Predict)
+		protectedUsers.POST("/exports/pdf", aiHandler.ExportPDF)
 	}
 
-	addr := fmt.Sprintf(
-		":%s",
-		cfg.Server.Port,
-	)
+	// ============================================================
+	// 8. NUEVO: Conversaciones (protegido con el mismo middleware)
+	// ============================================================
+	protectedConversations := router.Group("/api/conversations")
+	protectedConversations.Use(middleware.AuthMiddleware(authService))
+	{
+		protectedConversations.GET("", conversationHandler.List)
+		protectedConversations.GET("/:id/messages", conversationHandler.GetMessages)
+		protectedConversations.DELETE("/:id", conversationHandler.Delete)
+	}
 
-	log.Printf(
-		"Starting %s on %s",
-		cfg.Server.Name,
-		addr,
-	)
+	// ============================================================
+	// 9. Arrancar
+	// ============================================================
+	addr := fmt.Sprintf(":%s", cfg.Server.Port)
+	log.Printf("Starting %s on %s", cfg.Server.Name, addr)
 
 	if err := router.Run(addr); err != nil {
-		log.Fatalf(
-			"Failed to start server: %v",
-			err,
-		)
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }
