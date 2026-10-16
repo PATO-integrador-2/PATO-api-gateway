@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"time"
 
 	"backend/internal/config"
 	"backend/internal/database"
@@ -75,6 +78,8 @@ func main() {
 	}
 
 	viewService := services.NewViewService(db)
+
+	viewService := services.NewViewService(db, valkeyClient)
 
 	// Servicio encargado de validar tokens
 	authService := services.NewAuthService(
