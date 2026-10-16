@@ -4,10 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
-	"time"
 
 	"backend/internal/config"
 	"backend/internal/database"
@@ -47,7 +44,7 @@ func main() {
 	}
 
 	// ============================================================
-	// 3. Valkey (necesario antes de viewService y authService)
+	// 3. Valkey
 	// ============================================================
 	valkeyClient, err := database.ConnectValkey(cfg)
 	if err != nil {
@@ -56,7 +53,6 @@ func main() {
 
 	// ============================================================
 	// 4. Base de datos de usuarios (user_management_db)
-	//    Si no hay USERS_DATABASE_URL, reutilizamos DATABASE_URL.
 	// ============================================================
 	usersDBURL := cfg.UsersDB.URL
 	if usersDBURL == "" {
@@ -70,21 +66,16 @@ func main() {
 	}
 	defer usersDB.Close()
 
-	// ============================================================
-	// 5. Servicios y repositorios
-	// ============================================================
 	if err := usersDB.Ping(); err != nil {
 		log.Fatalf("Failed to ping users database: %v", err)
 	}
 
-	viewService := services.NewViewService(db)
-
+	// ============================================================
+	// 5. Servicios y repositorios
+	// ============================================================
 	viewService := services.NewViewService(db, valkeyClient)
 
-	// Servicio encargado de validar tokens
-	authService := services.NewAuthService(
-		valkeyClient,
-	)
+	authService := services.NewAuthService(valkeyClient)
 
 	userProxy, err := proxy.NewReverseProxy(cfg.UserService.BaseURL)
 	if err != nil {
@@ -92,7 +83,14 @@ func main() {
 	}
 
 	aiService := services.NewAIService(cfg.AIService.BaseURL)
-	chatbotService := services.NewChatbotService(cfg.GenerativeAI.BaseURL)
+
+	// Nota: el segundo argumento de NewChatbotService es *sql.DB.
+	// Asumo usersDB porque el chatbot gestiona conversaciones.
+	// Si el constructor espera la BD principal, cambia a `db`.
+	chatbotService := services.NewChatbotService(
+		cfg.GenerativeAI.BaseURL,
+		usersDB,
+	)
 
 	chatHandler := handlers.NewChatHandler(
 		chatbotService,
@@ -100,7 +98,6 @@ func main() {
 		cfg.CORS.AllowedOrigin,
 	)
 
-	// Repositorio y handler de conversaciones
 	conversationRepo := repository.NewConversationRepository(usersDB)
 	conversationHandler := handlers.NewConversationHandler(conversationRepo)
 
@@ -121,7 +118,6 @@ func main() {
 		})
 	})
 
-	// WebSocket del chat (valida token manualmente dentro del handler)
 	router.GET("/api/users/chat/ws", chatHandler.HandleChat)
 
 	// ============================================================
@@ -184,7 +180,7 @@ func main() {
 	}
 
 	// ============================================================
-	// 9. Conversaciones (protegido con el mismo middleware)
+	// 9. Conversaciones
 	// ============================================================
 	protectedConversations := router.Group("/api/conversations")
 	protectedConversations.Use(middleware.AuthMiddleware(authService))
