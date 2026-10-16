@@ -58,6 +58,20 @@ func ViewTotalHandler(viewService *services.ViewService, viewName string) gin.Ha
 	}
 }
 
+// HouseholdPovertyHandler devuelve el resumen por año y departamento de
+// vw_household_poverty_by_department (una fila por departamento y año, no una
+// por hogar).
+func HouseholdPovertyHandler(viewService *services.ViewService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data, err := viewService.GetHouseholdPovertyByDepartment()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve data"})
+			return
+		}
+		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+	}
+}
+
 // DepartmentalHandler devuelve una hoja del anexo departamental del IPM.
 // El departamento va en la ruta (/:departamento), sin importar tildes,
 // mayúsculas ni puntos: "Bogotá D.C." = "bogota dc". Sin él devuelve todos.

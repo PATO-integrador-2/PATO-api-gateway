@@ -225,6 +225,9 @@ func main() {
 			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"),
 		)
 
+		// Métricas que colorean el mapa (países + departamentos por año).
+		protectedUsers.GET("/map-metrics", handlers.MapMetricsHandler(viewService))
+
 		protectedUsers.GET(
 			"/poverty-by-age",
 			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"),
@@ -252,7 +255,7 @@ func main() {
 
 		protectedUsers.GET(
 			"/household-poverty-by-department",
-			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"),
+			handlers.HouseholdPovertyHandler(viewService),
 		)
 
 		// Anexo departamental del IPM (DANE), una ruta por hoja. Cada una
@@ -299,6 +302,12 @@ func main() {
 		protectedUsers.POST(
 			"/exports/pdf",
 			aiHandler.ExportPDF,
+		)
+
+		// IA generativa por HTTP (alternativa al WebSocket /chat/ws)
+		protectedUsers.POST(
+			"/chat/ask",
+			chatHandler.Ask,
 		)
 	}
 

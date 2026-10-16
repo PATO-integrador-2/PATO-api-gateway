@@ -42,7 +42,9 @@ var allowedViews = map[string]bool{
 	"vw_dimension_contribution":               true,
 	"vw_incidence_by_household_head_sex":      true,
 	"vw_incidence_by_person_sex":              true,
-	"vw_household_poverty_by_department":      true,
+	// vw_household_poverty_by_department no va aquí: tiene una fila por hogar
+	// (708 mil) y filtrarla o pedir sus categorías repite un pivote de ~68 s.
+	// Se sirve resumida en GetHouseholdPovertyByDepartment.
 }
 
 var allowedColumns = map[string]bool{
@@ -84,6 +86,11 @@ var allowedColumns = map[string]bool{
 // concurrentes de la misma key se colapsan en una sola consulta (singleflight).
 // Un fallo del caché nunca rompe la request: se cae a la base de datos.
 func (vs *ViewService) cached(key string, load func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	return vs.cachedTTL(key, viewCacheTTL, load)
+}
+
+// cachedTTL es cached con un TTL propio para la key.
+func (vs *ViewService) cachedTTL(key string, ttl time.Duration, load func(ctx context.Context) ([]byte, error)) ([]byte, error) {
 	ctx := context.Background()
 
 	if vs.cache != nil {
@@ -101,7 +108,7 @@ func (vs *ViewService) cached(key string, load func(ctx context.Context) ([]byte
 			return nil, err
 		}
 		if vs.cache != nil {
-			if err := vs.cache.Set(ctx, key, b, viewCacheTTL).Err(); err != nil {
+			if err := vs.cache.Set(ctx, key, b, ttl).Err(); err != nil {
 				log.Printf("Error guardando %s en caché: %v", key, err)
 			}
 		}

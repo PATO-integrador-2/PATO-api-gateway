@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -182,6 +183,66 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 			return
 		}
 	}
+}
+
+type askBody struct {
+	ConversationID string `json:"conversation_id"` // vacío = conversación nueva
+	Question       string `json:"question"`
+	Verbose        bool   `json:"verbose"`
+}
+
+// Ask es la versión HTTP (sin WebSocket) del chat: POST /api/users/chat/ask.
+// El user_id sale siempre del token validado por el gateway.
+func (h *ChatHandler) Ask(c *gin.Context) {
+	userID := c.GetString("userID")
+
+	var body askBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos: se requiere 'question'"})
+		return
+	}
+	if strings.TrimSpace(body.Question) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "La pregunta no puede estar vacía"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	conversationID := strings.TrimSpace(body.ConversationID)
+	if conversationID == "" {
+		var err error
+		conversationID, err = h.chatbotService.CreateConversation(ctx, userID, body.Question)
+		if err != nil {
+			log.Printf("error creando conversación (user=%s): %v", userID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "no se pudo crear la conversación"})
+			return
+		}
+	}
+
+	result, err := h.chatbotService.Ask(ctx, userID, services.AskRequest{
+		Question:       body.Question,
+		ConversationID: conversationID,
+		Verbose:        body.Verbose,
+	})
+	if err != nil {
+		log.Printf("error llamando a IA generativa (user=%s): %v", userID, err)
+		var upstream *services.PredictionUpstreamError
+		if errors.As(err, &upstream) && upstream.StatusCode >= 400 && upstream.StatusCode <= 599 {
+			c.JSON(upstream.StatusCode, gin.H{"error": "El servicio de IA no pudo procesar la pregunta"})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo contactar al servicio de IA"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"conversation_id": conversationID,
+		"answer":          result.Answer,
+		"intent":          result.Intent,
+		"status":          result.Status,
+		"sources":         result.Sources,
+		"tokens":          result.Tokens,
+		"latency_ms":      result.LatencyMs,
+	})
 }
 
 // pingLoop mantiene la conexión viva enviando pings periódicos; termina
