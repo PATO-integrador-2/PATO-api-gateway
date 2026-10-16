@@ -4,99 +4,50 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
-const (
-	// La versión de los datos (last_loaded_at) sale de una consulta barata y se
-	// cachea poco; el payload se cachea por versión, así que sólo se recalcula
-	// cuando hay una carga nueva. El TTL corto evita que versiones viejas
-	// queden ocupando memoria en Valkey.
-	mapMetaCacheTTL = 60 * time.Second
-	mapDataCacheTTL = 2 * time.Hour
-)
-
-type mapMeta struct {
-	LatestYear   *int64     `json:"latest_year"`
-	LastLoadedAt *time.Time `json:"last_loaded_at"`
-}
-
-// version identifica la carga actual de datos y sirve de clave y de ETag.
-func (m mapMeta) version() string {
-	if m.LastLoadedAt == nil {
-		return "0"
-	}
-	return fmt.Sprintf("%d", m.LastLoadedAt.UnixNano())
-}
+// El payload es chico (unos 7 KB) y la vista lo calcula con agregaciones
+// sobre las vistas del mapa, así que se cachea poco: así una carga nueva se
+// ve en menos de un minuto.
+const mapPayloadCacheTTL = 60 * time.Second
 
 // GetMapMetrics devuelve, ya comprimido en gzip, el JSON que colorea el mapa
-// (metadatos + países por año + departamentos por año) y la versión de los
-// datos para usarla como ETag. Sólo se guarda la copia comprimida.
+// tal como lo arma la vista vw_map_metrics_payload, y su versión
+// (datasetVersion) para usarla como ETag.
 func (vs *ViewService) GetMapMetrics() (gz []byte, version string, err error) {
-	rawMeta, err := vs.cachedTTL("map:meta", mapMetaCacheTTL, func(ctx context.Context) ([]byte, error) {
-		// Sólo se leen estas dos columnas: row_count obligaría a recalcular
-		// las vistas de países y departamentos.
-		var year sql.NullInt64
-		var loaded sql.NullTime
+	raw, err := vs.cachedTTL("map:payload", mapPayloadCacheTTL, func(ctx context.Context) ([]byte, error) {
+		var payload []byte
 		if err := vs.db.QueryRowContext(ctx,
-			`SELECT latest_year, last_loaded_at FROM mv_map_dataset_meta`,
-		).Scan(&year, &loaded); err != nil {
+			`SELECT payload FROM vw_map_metrics_payload`,
+		).Scan(&payload); err != nil {
 			return nil, err
 		}
-
-		var m mapMeta
-		if year.Valid {
-			m.LatestYear = &year.Int64
-		}
-		if loaded.Valid {
-			m.LastLoadedAt = &loaded.Time
-		}
-		return json.Marshal(m)
+		return payload, nil
 	})
 	if err != nil {
 		return nil, "", err
 	}
 
-	var meta mapMeta
-	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+	var meta struct {
+		DatasetVersion string `json:"datasetVersion"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil, "", err
 	}
-	version = meta.version()
+	version = meta.DatasetVersion
+	if version == "" {
+		version = "0"
+	}
 
-	gz, err = vs.cachedTTL("map:metrics:"+version, mapDataCacheTTL, func(ctx context.Context) ([]byte, error) {
-		var buf bytes.Buffer
-		zw := gzip.NewWriter(&buf)
-
-		zw.Write([]byte(`{"meta":`))
-		zw.Write(rawMeta)
-
-		zw.Write([]byte(`,"countries":`))
-		countries, err := vs.queryJSON(ctx,
-			`SELECT * FROM mv_map_country_year ORDER BY "year", country_id, area`)
-		if err != nil {
-			return nil, err
-		}
-		zw.Write(countries)
-
-		zw.Write([]byte(`,"departments":`))
-		departments, err := vs.queryJSON(ctx,
-			`SELECT * FROM mv_map_department_year ORDER BY "year", department_code`)
-		if err != nil {
-			return nil, err
-		}
-		zw.Write(departments)
-
-		zw.Write([]byte(`}`))
-		if err := zw.Close(); err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), nil
-	})
-	if err != nil {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(raw); err != nil {
 		return nil, "", err
 	}
-	return gz, version, nil
+	if err := zw.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), version, nil
 }
