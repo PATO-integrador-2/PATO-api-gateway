@@ -28,11 +28,19 @@ func (r *ConversationRepository) ListByUser(
 	limit, offset int,
 ) ([]models.ConversationSummary, error) {
 	const q = `
-		SELECT id, name, created_at
-		FROM ai_conversation
-		WHERE user_id = $1
-		  AND is_deleted = FALSE
-		ORDER BY created_at DESC
+		SELECT
+			c.id,
+			c.name,
+			c.created_at,
+			COALESCE(MAX(m.created_at), c.created_at) AS last_used_at
+		FROM ai_conversation c
+		LEFT JOIN ai_conversation_message m
+			ON m.conversation_id = c.id
+			AND m.is_deleted = FALSE
+		WHERE c.user_id = $1
+		  AND c.is_deleted = FALSE
+		GROUP BY c.id, c.name, c.created_at
+		ORDER BY last_used_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
@@ -45,7 +53,12 @@ func (r *ConversationRepository) ListByUser(
 	out := make([]models.ConversationSummary, 0, limit)
 	for rows.Next() {
 		var c models.ConversationSummary
-		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Name,
+			&c.CreatedAt,
+			&c.LastUsedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan conversation: %w", err)
 		}
 		out = append(out, c)

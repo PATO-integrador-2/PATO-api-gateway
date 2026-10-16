@@ -50,6 +50,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"user_id":       userID, // ← añade esto
 		"conversations": convs,
 		"limit":         limit,
 		"offset":        offset,
