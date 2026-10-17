@@ -123,13 +123,16 @@ func (r *ConversationRepository) GetMessages(
 }
 
 // SoftDelete marca la conversación como eliminada. Solo si pertenece al usuario.
+// SoftDelete marca la conversación como eliminada. Solo si pertenece al usuario.
 func (r *ConversationRepository) SoftDelete(
 	ctx context.Context,
 	conversationID, userID string,
 ) error {
 	const q = `
 		UPDATE ai_conversation
-		SET is_deleted = TRUE
+		SET 
+			is_deleted = TRUE,
+			deleted_at = NOW() -- <- Aquí está la magia para cumplir el constraint
 		WHERE id = $1
 		  AND user_id = $2
 		  AND is_deleted = FALSE
