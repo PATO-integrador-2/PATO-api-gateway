@@ -158,6 +158,8 @@ func main() {
 			handlers.ViewTotalHandler(viewService, "vw_deprivations_by_variable"))
 		protectedUsers.GET("/national-poverty",
 			handlers.ViewTotalHandler(viewService, "vw_dashboard03_national_poverty"))
+		// Métricas que colorean el mapa (vista vw_map_metrics_payload).
+		protectedUsers.GET("/map-metrics", handlers.MapMetricsHandler(viewService))
 		protectedUsers.GET("/poverty-by-age",
 			handlers.ViewTotalHandler(viewService, "vw_dashboard03_poverty_by_age"))
 		protectedUsers.GET("/deprivations-contribution",
