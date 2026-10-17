@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -119,8 +120,9 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 }
 
 // Delete — DELETE /api/conversations/:id
+// Delete — DELETE /api/conversations/:id
 func (h *ConversationHandler) Delete(c *gin.Context) {
-	userID, ok := c.Get("userID")
+	userIDAny, ok := c.Get("userID")
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "unauthorized",
@@ -129,12 +131,28 @@ func (h *ConversationHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	userID, ok := userIDAny.(string)
+	if !ok || userID == "" {
+		log.Printf("[conversations.Delete] userID inválido: %v (tipo %T)", userIDAny, userIDAny)
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "unauthorized",
+			"code":  "UNAUTHORIZED",
+		})
+		return
+	}
+
 	conversationID := c.Param("id")
+	if conversationID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "id de conversación requerido",
+		})
+		return
+	}
 
 	err := h.repo.SoftDelete(
 		c.Request.Context(),
 		conversationID,
-		userID.(string),
+		userID,
 	)
 	if errors.Is(err, repository.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -143,8 +161,11 @@ func (h *ConversationHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		log.Printf("[conversations.Delete] error borrando conv %s (user=%s): %v",
+			conversationID, userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "no se pudo eliminar la conversación",
+			"debug": err.Error(), // ← QUITAR EN PRODUCCIÓN
 		})
 		return
 	}
