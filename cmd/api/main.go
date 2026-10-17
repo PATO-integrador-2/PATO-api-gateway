@@ -171,7 +171,7 @@ func main() {
 		protectedUsers.GET("/incidence-by-person-sex",
 			handlers.ViewTotalHandler(viewService, "vw_incidence_by_person_sex"))
 		protectedUsers.GET("/household-poverty-by-department",
-			handlers.ViewTotalHandler(viewService, "vw_household_poverty_by_department"))
+			handlers.HouseholdPovertyHandler(viewService))
 
 		protectedUsers.POST("/filtered", viewHandler.GetViewFilteredData)
 		protectedUsers.POST("/filtered/multi", viewHandler.GetViewFilteredDataMulti)
