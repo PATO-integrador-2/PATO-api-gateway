@@ -179,6 +179,22 @@ func main() {
 
 		protectedUsers.POST("/predictions/:type", aiHandler.Predict)
 		protectedUsers.POST("/exports/pdf", aiHandler.ExportPDF)
+
+		// Anexo departamental del IPM (DANE), una ruta por hoja. Cada una
+		// responde la lista completa y también /<ruta>/:departamento.
+		departmentalRoutes := map[string]string{
+			"/ipm-departments":            "ipm_departamentos",
+			"/ipm-department-indicators":  "ipm_indicadores_departamento",
+			"/adjusted-ipm-incidence":     "incidencia_ajustada_ipm",
+			"/ipm-department-sex":         "ipm_sexo",
+			"/adjusted-ipm-contributions": "contribuciones_ia_ipm",
+		}
+
+		for path, sheet := range departmentalRoutes {
+			handler := handlers.DepartmentalHandler(viewService, sheet)
+			protectedUsers.GET(path, handler)
+			protectedUsers.GET(path+"/:departamento", handler)
+		}
 	}
 
 	// ============================================================
