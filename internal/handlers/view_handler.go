@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -65,6 +66,7 @@ func HouseholdPovertyHandler(viewService *services.ViewService) gin.HandlerFunc 
 	return func(c *gin.Context) {
 		data, err := viewService.GetHouseholdPovertyByDepartment()
 		if err != nil {
+			log.Printf("household-poverty-by-department: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve data"})
 			return
 		}
