@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -101,6 +102,16 @@ func main() {
 	conversationRepo := repository.NewConversationRepository(usersDB)
 	conversationHandler := handlers.NewConversationHandler(conversationRepo)
 
+	scraperRepo := repository.NewScraperRepository(usersDB)
+	scraperService := services.NewScraperService(scraperRepo, cfg.Scraper.BaseURL)
+
+	// Arrancar el reloj de tareas (Cron)
+	if err := scraperService.StartScheduler(context.Background()); err != nil {
+		log.Printf("[warn] Falló al iniciar Scraper Scheduler: %v", err)
+	}
+
+	scraperHandler := handlers.NewScraperHandler(scraperService)
+
 	// ============================================================
 	// 6. Router
 	// ============================================================
@@ -177,6 +188,16 @@ func main() {
 
 		protectedUsers.POST("/predictions/:type", aiHandler.Predict)
 		protectedUsers.POST("/exports/pdf", aiHandler.ExportPDF)
+	}
+
+	// ============================================================
+	// 8.1 Rutas internas del Scraper (Sin Auth)
+	// ============================================================
+	internalRoutes := router.Group("/api/internal/scraper")
+	{
+		internalRoutes.POST("/schedules", scraperHandler.CreateSchedule)
+		internalRoutes.GET("/schedules", scraperHandler.ListSchedules)
+		internalRoutes.POST("/schedules/:id/run", scraperHandler.TriggerSchedule)
 	}
 
 	// ============================================================

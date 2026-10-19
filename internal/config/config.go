@@ -15,6 +15,7 @@ type Config struct {
 	Valkey       ValkeyConfig
 	CORS         CORSConfig
 	UsersDB      DatabaseConfig // NEW
+	Scraper      ServiceConfig
 }
 
 type ServerConfig struct {
@@ -78,6 +79,10 @@ func Load() (*Config, error) {
 			Username: getEnv("APP_VALKEY_USER", ""),
 			Password: getEnv("APP_VALKEY_PASSWORD", ""),
 			DB:       getEnvInt("APP_VALKEY_DB", 0),
+		},
+
+		Scraper: ServiceConfig{
+			BaseURL: getEnv("SCRAPER_SERVICE_URL", "http://localhost:8000"),
 		},
 
 		CORS: CORSConfig{
